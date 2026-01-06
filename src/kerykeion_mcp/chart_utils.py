@@ -25,6 +25,7 @@ def resolve_css_variables(svg_string: str) -> str:
     Resolve CSS custom properties (variables) in SVG for CairoSVG compatibility.
     
     CairoSVG doesn't support CSS variables, so we need to inline the values.
+    Handles nested variable references (e.g., --foo: var(--bar)).
     
     Args:
         svg_string: SVG content with CSS variables
@@ -40,12 +41,36 @@ def resolve_css_variables(svg_string: str) -> str:
     if not var_defs:
         return svg_string
     
-    # Replace var(--name) with actual values
+    # First, resolve nested variable references in the definitions themselves
+    # Some variables reference other variables, e.g., --foo: var(--bar)
+    max_iterations = 10  # Prevent infinite loops
+    for _ in range(max_iterations):
+        updated = False
+        for var_name, var_value in var_defs.items():
+            if 'var(--' in var_value:
+                # Replace var(--xxx) with the actual value
+                def resolve_nested(match):
+                    ref_name = match.group(1)
+                    return var_defs.get(ref_name, '#000000')
+                new_value = re.sub(r'var\(--([\w-]+)\)', resolve_nested, var_value)
+                if new_value != var_value:
+                    var_defs[var_name] = new_value
+                    updated = True
+        if not updated:
+            break
+    
+    # Now replace var(--name) with actual values in the SVG
     def replace_var(match):
         var_name = match.group(1)
         return var_defs.get(var_name, '#000000')  # fallback to black
     
-    resolved = re.sub(r'var\(--([\w-]+)\)', replace_var, svg_string)
+    # Multiple passes to catch any remaining nested references
+    resolved = svg_string
+    for _ in range(3):
+        new_resolved = re.sub(r'var\(--([\w-]+)\)', replace_var, resolved)
+        if new_resolved == resolved:
+            break
+        resolved = new_resolved
     
     logger.debug(f"Resolved {len(var_defs)} CSS variables in SVG")
     return resolved
