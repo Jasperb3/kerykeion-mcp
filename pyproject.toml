@@ -1,0 +1,38 @@
+[project]
+name = "kerykeion-mcp"
+version = "0.1.0"
+description = "MCP server for astrological chart generation using Kerykeion"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Ben Jasper" }]
+keywords = ["mcp", "astrology", "kerykeion", "charts"]
+
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "kerykeion>=5.6.0",
+    "pytz>=2024.1",
+    "cairosvg>=2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+kerykeion-mcp = "kerykeion_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kerykeion_mcp"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]

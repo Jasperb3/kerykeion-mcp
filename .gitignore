@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+test_outputs/
+.kerykeion_charts/
+.DS_Store
