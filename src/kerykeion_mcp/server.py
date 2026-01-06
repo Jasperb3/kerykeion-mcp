@@ -153,6 +153,7 @@ def generate_natal_chart(
         house_system: House system - "P" (Placidus), "W" (Whole Sign), "K" (Koch), etc.
         zodiac_type: "Tropical" (Western) or "Sidereal" (Vedic)
         output_format: "text" (text only), "images" (text + save images to files), or "all"
+        output_dir: Directory to save chart images (optional)
         
     Returns:
         Dictionary containing:
@@ -161,6 +162,7 @@ def generate_natal_chart(
         - subject_name: Name of the chart subject
         - svg_path: Path to saved SVG file (if images requested)
         - png_path: Path to saved PNG file (if images requested)
+        - output_dir: Directory where files were saved
     """
     logger.info(f"Generating natal chart for {name}")
     
@@ -247,6 +249,7 @@ def generate_synastry_chart(
         house_system: House system identifier
         include_relationship_score: Include compatibility score calculation
         output_format: "text", "svg", "png", or "all"
+        output_dir: Directory to save chart images (optional)
         
     Returns:
         Dictionary with synastry analysis including aspects between charts
@@ -351,6 +354,7 @@ def generate_transit_chart(
         language: Chart language (default: EN)
         house_system: House system identifier
         output_format: "text", "svg", "png", or "all"
+        output_dir: Directory to save chart images (optional)
         
     Returns:
         Dictionary with transit aspects to natal positions
@@ -457,6 +461,7 @@ def generate_composite_chart(
         language: Chart language (default: EN)
         house_system: House system identifier
         output_format: "text", "svg", "png", or "all"
+        output_dir: Directory to save chart images (optional)
         
     Returns:
         Dictionary with composite chart representing the relationship entity
@@ -549,6 +554,7 @@ def generate_planetary_return(
         language: Chart language (default: EN)
         house_system: House system identifier
         output_format: "text", "svg", "png", or "all"
+        output_dir: Directory to save chart images (optional)
         
     Returns:
         Dictionary with return chart data
@@ -651,6 +657,7 @@ def generate_event_chart(
         language: Chart language (default: EN)
         house_system: House system identifier
         output_format: "text", "svg", "png", or "all"
+        output_dir: Directory to save chart images (optional)
         
     Returns:
         Dictionary with event chart data
