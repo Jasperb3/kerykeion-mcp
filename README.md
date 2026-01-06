@@ -116,6 +116,8 @@ uv run mcp install src/kerykeion_mcp/server.py --name "Kerykeion Charts"
 | `generate_planetary_return` | Solar/Lunar returns |
 | `generate_event_chart` | Chart for any specific moment |
 | `get_current_positions` | Current planetary positions (text only) |
+| `get_aspects` | Get natal chart aspects without images |
+| `get_synastry_aspects` | Get inter-chart aspects for compatibility |
 
 ### Common Parameters
 
@@ -124,9 +126,11 @@ All chart tools accept:
 - **tz_str**: IANA timezone (e.g., "Europe/Rome", "America/New_York")
 - **theme**: "classic", "light", "dark", "strawberry", "dark-high-contrast"
 - **language**: "EN" (default), "IT", "FR", "ES", "PT", "CN", "RU", "TR", "DE", "HI"
-- **house_system**: "P" (Placidus), "W" (Whole Sign), "K" (Koch), etc.
+- **house_system**: "P" (Placidus), "W" (Whole Sign), "K" (Koch), "M" (Morinus), etc.
 - **output_format**: "text", "images", or "all"
 - **output_dir**: Custom directory to save chart images (optional)
+- **chart_style**: "full" (default), "wheel_only", or "aspect_grid"
+
 
 ### Response Format
 
