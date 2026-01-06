@@ -14,7 +14,7 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 
 ### Output Formats
 - **Text** - AI-readable descriptions optimized for LLM interpretation
-- **SVG** - Vector chart images saved to files + `svg_content` for direct embedding
+- **SVG** - Vector chart images saved to files (path returned in response)
 - **PNG** - High-resolution (1600px) raster images (requires `cairosvg`)
 
 ## Installation
@@ -130,29 +130,32 @@ All chart tools accept:
 
 ### Response Format
 
-All chart tools return:
+All chart tools return a compact response (~1KB) with file paths:
 ```json
 {
+  "status": "success",
+  "summary": "Chart generated successfully. SVG: /path/to/file.svg, PNG: /path/to/file.png",
   "chart_type": "Natal",
   "subject_name": "Test",
   "text": "AI-readable chart analysis...",
-  "svg_content": "<svg>...</svg>",
   "svg_path": "/home/user/.kerykeion_charts/natal_test_20260106.svg",
   "png_path": "/home/user/.kerykeion_charts/natal_test_20260106.png",
   "output_dir": "/home/user/.kerykeion_charts"
 }
 ```
 
+> **Note**: Chart content is saved to files rather than returned inline. This keeps responses small and prevents MCP clients from showing "Tool result too large" messages. The AI assistant can read SVG files directly if needed for embedding.
+
 ## Embedding Charts in Claude Artifacts
 
-### Method 1: SVG in HTML (Recommended)
+### Method 1: Read SVG File (Recommended)
 
-Response includes `svg_content` with full SVG markup:
+The AI assistant can read the SVG file directly from `svg_path` and embed it:
 
 ```html
 <html>
 <body>
-{svg_content}
+<!-- SVG content read from svg_path file -->
 </body>
 </html>
 ```

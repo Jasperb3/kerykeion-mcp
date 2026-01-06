@@ -164,7 +164,12 @@ def generate_and_save_images(
     save_png: bool = True,
 ) -> dict:
     """
-    Save chart images to files and return file paths plus content for embedding.
+    Save chart images to files and return file paths.
+    
+    NOTE: svg_content is intentionally NOT included in the response to keep
+    tool results small (~1KB instead of ~200KB). This prevents MCP clients
+    from showing confusing "Tool result too large for context" messages.
+    The AI assistant can read the SVG file directly from svg_path if needed.
     
     Args:
         svg_string: SVG content string
@@ -175,10 +180,11 @@ def generate_and_save_images(
         
     Returns:
         Dictionary with:
+        - status: "success" indicator
         - svg_path: Path to SVG file (if saved)
         - png_path: Path to PNG file (if saved)
-        - svg_content: Full SVG markup for embedding in HTML artifacts
         - output_dir: Directory where files were saved
+        - summary: Human-readable success message
     """
     import re
     from datetime import datetime
@@ -196,14 +202,18 @@ def generate_and_save_images(
         out_path = get_chart_output_dir()
     
     result = {
+        "status": "success",
         "output_dir": str(out_path),
-        "svg_content": svg_string,  # Full SVG for direct embedding in artifacts
     }
+    
+    svg_path_str = None
+    png_path_str = None
     
     if save_svg:
         svg_path = out_path / f"{base_name}.svg"
         svg_path.write_text(svg_string, encoding='utf-8')
-        result["svg_path"] = str(svg_path)
+        svg_path_str = str(svg_path)
+        result["svg_path"] = svg_path_str
         logger.info(f"Saved SVG to {svg_path}")
     
     if save_png and HAS_CAIROSVG:
@@ -211,8 +221,15 @@ def generate_and_save_images(
         if png_bytes:
             png_path = out_path / f"{base_name}.png"
             png_path.write_bytes(png_bytes)
-            result["png_path"] = str(png_path)
+            png_path_str = str(png_path)
+            result["png_path"] = png_path_str
             logger.info(f"Saved PNG to {png_path}")
+    
+    # Add human-readable summary
+    result["summary"] = (
+        f"Chart generated successfully. "
+        f"SVG: {svg_path_str or 'N/A'}, PNG: {png_path_str or 'N/A'}"
+    )
     
     return result
 

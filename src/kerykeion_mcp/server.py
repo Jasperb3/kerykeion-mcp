@@ -169,12 +169,13 @@ def generate_natal_chart(
         
     Returns:
         dict: Contains:
+        - status: "success" when chart generated
+        - summary: Human-readable success message with file paths
         - text: AI-readable text description of the chart
         - chart_type: "Natal"
         - subject_name: Name of the chart subject
         - svg_path: Path to saved SVG file (if images requested)
         - png_path: Path to saved PNG file (if images requested)
-        - svg_content: Full SVG markup for embedding in HTML artifacts
         - output_dir: Directory where files were saved
     """
     logger.info(f"Generating natal chart for {name}")
@@ -275,7 +276,7 @@ def generate_synastry_chart(
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        dict: Synastry analysis with svg_content for embedding
+        dict: Synastry analysis with status, summary, and file paths
     """
     logger.info(f"Generating synastry chart for {name1} and {name2}")
     
@@ -384,7 +385,7 @@ def generate_transit_chart(
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        dict: Transit analysis with svg_content for embedding
+        dict: Transit analysis with status, summary, and file paths
     """
     logger.info(f"Generating transit chart for {natal_name}")
     
@@ -495,7 +496,7 @@ def generate_composite_chart(
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        dict: Composite chart with svg_content for embedding
+        dict: Composite chart with status, summary, and file paths
     """
     logger.info(f"Generating composite chart for {name1} and {name2}")
     
@@ -592,7 +593,7 @@ def generate_planetary_return(
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        dict: Return chart with svg_content for embedding
+        dict: Return chart with status, summary, and file paths
     """
     # Validate return_type
     if return_type not in ("Solar", "Lunar"):
@@ -699,7 +700,7 @@ def generate_event_chart(
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        dict: Event chart with svg_content for embedding
+        dict: Event chart with status, summary, and file paths
     """
     logger.info(f"Generating event chart for {event_name}")
     
