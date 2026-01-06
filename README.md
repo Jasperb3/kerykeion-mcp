@@ -14,15 +14,15 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 
 ### Output Formats
 - **Text** - AI-readable descriptions optimized for LLM interpretation
-- **SVG** - Vector chart images as base64 data URIs
-- **PNG** - Raster chart images (requires `cairosvg`)
+- **SVG** - Vector chart images saved to files + `svg_content` for direct embedding
+- **PNG** - High-resolution (1600px) raster images (requires `cairosvg`)
 
 ## Installation
 
 ### Using uv (Recommended)
 
 ```bash
-cd kerykeion_charts
+cd kerykeion-mcp
 uv sync
 ```
 
@@ -60,8 +60,8 @@ Then open the MCP Inspector at `http://localhost:8000/mcp` to test tools.
 
 Add to your Claude Desktop config file:
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`  
 **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
 ```json
@@ -71,7 +71,7 @@ Add to your Claude Desktop config file:
       "command": "uv",
       "args": [
         "run",
-        "--directory", "/path/to/kerykeion_charts",
+        "--directory", "/path/to/kerykeion-mcp",
         "python", "-m", "kerykeion_mcp.server"
       ]
     }
@@ -105,9 +105,6 @@ uv run mcp install src/kerykeion_mcp/server.py --name "Kerykeion Charts"
    - Enable Developer Mode: Settings → Connectors → Advanced → Developer mode
    - Add MCP Server URL: `https://abc123.ngrok-free.app/sse`
 
-> **Note**: Free ngrok URLs change on restart. For persistent URLs, consider ngrok paid plans or alternatives like Cloudflare Tunnel, localtunnel, or hosting on a cloud provider.
-
-
 ## Available Tools
 
 | Tool | Description |
@@ -128,7 +125,49 @@ All chart tools accept:
 - **theme**: "classic", "light", "dark", "strawberry", "dark-high-contrast"
 - **language**: "EN" (default), "IT", "FR", "ES", "PT", "CN", "RU", "TR", "DE", "HI"
 - **house_system**: "P" (Placidus), "W" (Whole Sign), "K" (Koch), etc.
-- **output_format**: "text", "svg", "png", or "all"
+- **output_format**: "text", "images", or "all"
+- **output_dir**: Custom directory to save chart images (optional)
+
+### Response Format
+
+All chart tools return:
+```json
+{
+  "chart_type": "Natal",
+  "subject_name": "Test",
+  "text": "AI-readable chart analysis...",
+  "svg_content": "<svg>...</svg>",
+  "svg_path": "/home/user/.kerykeion_charts/natal_test_20260106.svg",
+  "png_path": "/home/user/.kerykeion_charts/natal_test_20260106.png",
+  "output_dir": "/home/user/.kerykeion_charts"
+}
+```
+
+## Embedding Charts in Claude Artifacts
+
+### Method 1: SVG in HTML (Recommended)
+
+Response includes `svg_content` with full SVG markup:
+
+```html
+<html>
+<body>
+{svg_content}
+</body>
+</html>
+```
+
+Result: Interactive, scalable vector chart in artifact.
+
+### Method 2: PNG with File Path
+
+Response includes `png_path` for local file linking:
+
+```markdown
+![Chart](file:///C:/Users/.../chart.png)
+```
+
+Download the markdown file - image renders from local path.
 
 ## Example Usage
 
