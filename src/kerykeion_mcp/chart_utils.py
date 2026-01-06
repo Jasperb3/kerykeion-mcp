@@ -164,7 +164,7 @@ def generate_and_save_images(
     save_png: bool = True,
 ) -> dict:
     """
-    Save chart images to files and return file paths.
+    Save chart images to files and return file paths plus content for embedding.
     
     Args:
         svg_string: SVG content string
@@ -174,9 +174,11 @@ def generate_and_save_images(
         save_png: Whether to save PNG file
         
     Returns:
-        Dictionary with file paths:
+        Dictionary with:
         - svg_path: Path to SVG file (if saved)
         - png_path: Path to PNG file (if saved)
+        - svg_content: Full SVG markup for embedding in HTML artifacts
+        - output_dir: Directory where files were saved
     """
     import re
     from datetime import datetime
@@ -193,7 +195,10 @@ def generate_and_save_images(
     else:
         out_path = get_chart_output_dir()
     
-    result = {"output_dir": str(out_path)}
+    result = {
+        "output_dir": str(out_path),
+        "svg_content": svg_string,  # Full SVG for direct embedding in artifacts
+    }
     
     if save_svg:
         svg_path = out_path / f"{base_name}.svg"

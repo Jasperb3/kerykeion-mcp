@@ -138,6 +138,18 @@ def generate_natal_chart(
     """
     Generate a natal (birth) chart for an individual.
     
+    EMBEDDING IN CLAUDE ARTIFACTS:
+    
+    Method 1: SVG Embedded in HTML (Recommended)
+      - Response includes 'svg_content' - full SVG markup
+      - Create HTML artifact: <html><body>{svg_content}</body></html>
+      - Result: Interactive scalable chart in artifact
+    
+    Method 2: PNG with File Path
+      - Response includes 'png_path' - local file path
+      - Create markdown: ![Chart](file:///{png_path})
+      - Download .md file - image renders from local path
+    
     Args:
         name: Name or identifier for the chart subject
         year: Birth year (e.g., 1990)
@@ -152,16 +164,17 @@ def generate_natal_chart(
         language: Chart language - "EN", "IT", "FR", "ES", "PT", "CN", "RU", "TR", "DE", "HI"
         house_system: House system - "P" (Placidus), "W" (Whole Sign), "K" (Koch), etc.
         zodiac_type: "Tropical" (Western) or "Sidereal" (Vedic)
-        output_format: "text" (text only), "images" (text + save images to files), or "all"
+        output_format: "text" (text only), "images" (text + save images), or "all"
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        Dictionary containing:
+        dict: Contains:
         - text: AI-readable text description of the chart
-        - chart_type: Type of chart generated
+        - chart_type: "Natal"
         - subject_name: Name of the chart subject
         - svg_path: Path to saved SVG file (if images requested)
         - png_path: Path to saved PNG file (if images requested)
+        - svg_content: Full SVG markup for embedding in HTML artifacts
         - output_dir: Directory where files were saved
     """
     logger.info(f"Generating natal chart for {name}")
@@ -233,6 +246,16 @@ def generate_synastry_chart(
     """
     Generate a synastry chart comparing two people for compatibility analysis.
     
+    EMBEDDING IN CLAUDE ARTIFACTS:
+    
+    Method 1: SVG Embedded in HTML (Recommended)
+      - Response includes 'svg_content' - full SVG markup
+      - Create HTML artifact: <html><body>{svg_content}</body></html>
+    
+    Method 2: PNG with File Path
+      - Response includes 'png_path' - local file path
+      - Create markdown: ![Chart](file:///{png_path})
+    
     Args:
         name1: Name of first person
         year1, month1, day1: Birth date of first person
@@ -248,11 +271,11 @@ def generate_synastry_chart(
         language: Chart language (default: EN)
         house_system: House system identifier
         include_relationship_score: Include compatibility score calculation
-        output_format: "text", "svg", "png", or "all"
+        output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        Dictionary with synastry analysis including aspects between charts
+        dict: Synastry analysis with svg_content for embedding
     """
     logger.info(f"Generating synastry chart for {name1} and {name2}")
     
@@ -338,6 +361,10 @@ def generate_transit_chart(
     """
     Generate a transit chart showing current (or specified) planetary transits to a natal chart.
     
+    EMBEDDING IN CLAUDE ARTIFACTS:
+      - Response includes 'svg_content' for HTML: <html><body>{svg_content}</body></html>
+      - Response includes 'png_path' for markdown: ![Chart](file:///{png_path})
+    
     If transit date/time is not specified, uses current time.
     
     Args:
@@ -353,11 +380,11 @@ def generate_transit_chart(
         theme: Chart theme
         language: Chart language (default: EN)
         house_system: House system identifier
-        output_format: "text", "svg", "png", or "all"
+        output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        Dictionary with transit aspects to natal positions
+        dict: Transit analysis with svg_content for embedding
     """
     logger.info(f"Generating transit chart for {natal_name}")
     
@@ -443,6 +470,10 @@ def generate_composite_chart(
     """
     Generate a composite chart (midpoint composite) for two people.
     
+    EMBEDDING IN CLAUDE ARTIFACTS:
+      - Response includes 'svg_content' for HTML: <html><body>{svg_content}</body></html>
+      - Response includes 'png_path' for markdown: ![Chart](file:///{png_path})
+    
     A composite chart creates a single chart representing the relationship 
     by calculating the midpoints of each planet between two charts.
     
@@ -460,11 +491,11 @@ def generate_composite_chart(
         theme: Chart theme
         language: Chart language (default: EN)
         house_system: House system identifier
-        output_format: "text", "svg", "png", or "all"
+        output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        Dictionary with composite chart representing the relationship entity
+        dict: Composite chart with svg_content for embedding
     """
     logger.info(f"Generating composite chart for {name1} and {name2}")
     
@@ -539,6 +570,10 @@ def generate_planetary_return(
     """
     Generate a planetary return chart (Solar Return, Lunar Return)
     
+    EMBEDDING IN CLAUDE ARTIFACTS:
+      - Response includes 'svg_content' for HTML: <html><body>{svg_content}</body></html>
+      - Response includes 'png_path' for markdown: ![Chart](file:///{png_path})
+    
     A return chart is calculated for when a planet returns to its natal position.
     Solar returns occur yearly, lunar returns monthly.
     
@@ -553,11 +588,11 @@ def generate_planetary_return(
         theme: Chart theme
         language: Chart language (default: EN)
         house_system: House system identifier
-        output_format: "text", "svg", "png", or "all"
+        output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        Dictionary with return chart data
+        dict: Return chart with svg_content for embedding
     """
     # Validate return_type
     if return_type not in ("Solar", "Lunar"):
@@ -644,6 +679,10 @@ def generate_event_chart(
     """
     Generate an event chart for a specific moment in time (electional, horary, event).
     
+    EMBEDDING IN CLAUDE ARTIFACTS:
+      - Response includes 'svg_content' for HTML: <html><body>{svg_content}</body></html>
+      - Response includes 'png_path' for markdown: ![Chart](file:///{png_path})
+    
     Use this for analyzing the astrological conditions at any specific moment,
     such as the start of a business, a question asked, or an important event.
     
@@ -656,11 +695,11 @@ def generate_event_chart(
         theme: Chart theme
         language: Chart language (default: EN)
         house_system: House system identifier
-        output_format: "text", "svg", "png", or "all"
+        output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         
     Returns:
-        Dictionary with event chart data
+        dict: Event chart with svg_content for embedding
     """
     logger.info(f"Generating event chart for {event_name}")
     
