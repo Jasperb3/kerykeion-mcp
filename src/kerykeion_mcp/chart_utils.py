@@ -245,9 +245,17 @@ VALID_HOUSE_SYSTEMS = {
     "A": "Equal",
     "C": "Campanus",
     "R": "Regiomontanus",
+    "M": "Morinus",
+    "O": "Porphyry",
+    "G": "Gauquelin (Sectors)",
 }
 VALID_ZODIAC_TYPES = ["Tropical", "Sidereal"]
-VALID_SIDEREAL_MODES = ["LAHIRI", "RAMAN", "FAGAN_BRADLEY", "KRISHNAMURTI"]
+VALID_SIDEREAL_MODES = [
+    "FAGAN_BRADLEY", "LAHIRI", "DELUCE", "RAMAN", "USHASHASHI", 
+    "KRISHNAMURTI", "DJWHAL_KHOOL", "YUKTESWAR", "JN_BHASIN", "HINDU_LAHIRI"
+]
+VALID_PERSPECTIVE_TYPES = ["Apparent Geocentric", "Heliocentric", "Topocentric"]
+VALID_CHART_STYLES = ["full", "wheel_only", "aspect_grid"]
 
 
 def validate_theme(theme: str) -> str:
@@ -274,3 +282,33 @@ def validate_house_system(house_system: str) -> str:
         return hs_upper
     logger.warning(f"Invalid house system '{house_system}', using 'P' (Placidus)")
     return "P"
+
+
+def validate_sidereal_mode(sidereal_mode: Optional[str]) -> Optional[str]:
+    """Validate sidereal mode, returns None if invalid."""
+    if sidereal_mode is None:
+        return None
+    mode_upper = sidereal_mode.upper()
+    if mode_upper in VALID_SIDEREAL_MODES:
+        return mode_upper
+    logger.warning(f"Invalid sidereal mode '{sidereal_mode}', ignoring")
+    return None
+
+
+def validate_perspective_type(perspective_type: str) -> str:
+    """Validate perspective type, defaulting to 'Apparent Geocentric'."""
+    # Allow partial/case-insensitive matching
+    pt_lower = perspective_type.lower()
+    for valid in VALID_PERSPECTIVE_TYPES:
+        if pt_lower == valid.lower() or pt_lower in valid.lower():
+            return valid
+    logger.warning(f"Invalid perspective type '{perspective_type}', using 'Apparent Geocentric'")
+    return "Apparent Geocentric"
+
+
+def validate_chart_style(chart_style: str) -> str:
+    """Validate chart style."""
+    if chart_style.lower() in VALID_CHART_STYLES:
+        return chart_style.lower()
+    logger.warning(f"Invalid chart style '{chart_style}', using 'full'")
+    return "full"

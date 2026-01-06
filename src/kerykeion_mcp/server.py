@@ -17,6 +17,7 @@ from kerykeion import (
     ChartDrawer,
     CompositeSubjectFactory,
     PlanetaryReturnFactory,
+    AspectsFactory,
     to_context,
 )
 
@@ -25,10 +26,16 @@ from .chart_utils import (
     validate_theme,
     validate_language,
     validate_house_system,
+    validate_sidereal_mode,
+    validate_perspective_type,
+    validate_chart_style,
     HAS_CAIROSVG,
     VALID_THEMES,
     VALID_LANGUAGES,
     VALID_HOUSE_SYSTEMS,
+    VALID_SIDEREAL_MODES,
+    VALID_PERSPECTIVE_TYPES,
+    VALID_CHART_STYLES,
     get_chart_output_dir,
 )
 
@@ -115,6 +122,17 @@ are making aspects to my natal positions."""
 # =============================================================================
 
 OutputFormat = Literal["text", "images", "all"]
+ChartStyle = Literal["full", "wheel_only", "aspect_grid"]
+
+
+def get_svg_by_style(drawer: ChartDrawer, chart_style: str) -> str:
+    """Generate SVG string based on chart style."""
+    if chart_style == "wheel_only":
+        return drawer.generate_wheel_only_svg_string()
+    elif chart_style == "aspect_grid":
+        return drawer.generate_aspect_grid_only_svg_string()
+    else:
+        return drawer.generate_svg_string()
 
 
 @mcp.tool()
@@ -134,21 +152,10 @@ def generate_natal_chart(
     zodiac_type: str = "Tropical",
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
+    chart_style: ChartStyle = "full",
 ) -> dict:
     """
     Generate a natal (birth) chart for an individual.
-    
-    EMBEDDING IN CLAUDE ARTIFACTS:
-    
-    Method 1: SVG Embedded in HTML (Recommended)
-      - Response includes 'svg_content' - full SVG markup
-      - Create HTML artifact: <html><body>{svg_content}</body></html>
-      - Result: Interactive scalable chart in artifact
-    
-    Method 2: PNG with File Path
-      - Response includes 'png_path' - local file path
-      - Create markdown: ![Chart](file:///{png_path})
-      - Download .md file - image renders from local path
     
     Args:
         name: Name or identifier for the chart subject
@@ -166,17 +173,10 @@ def generate_natal_chart(
         zodiac_type: "Tropical" (Western) or "Sidereal" (Vedic)
         output_format: "text" (text only), "images" (text + save images), or "all"
         output_dir: Directory to save chart images (optional)
+        chart_style: "full" (complete chart), "wheel_only" (just the wheel), "aspect_grid" (just aspects table)
         
     Returns:
-        dict: Contains:
-        - status: "success" when chart generated
-        - summary: Human-readable success message with file paths
-        - text: AI-readable text description of the chart
-        - chart_type: "Natal"
-        - subject_name: Name of the chart subject
-        - svg_path: Path to saved SVG file (if images requested)
-        - png_path: Path to saved PNG file (if images requested)
-        - output_dir: Directory where files were saved
+        dict: Contains text analysis and file paths to saved images
     """
     logger.info(f"Generating natal chart for {name}")
     
@@ -184,6 +184,7 @@ def generate_natal_chart(
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
+    chart_style = validate_chart_style(chart_style)
     
     # Create astrological subject
     subject = AstrologicalSubjectFactory.from_birth_data(
@@ -202,6 +203,7 @@ def generate_natal_chart(
     # Build response
     result = {
         "chart_type": "Natal",
+        "chart_style": chart_style,
         "subject_name": name,
         "text": to_context(chart_data),
     }
@@ -213,12 +215,12 @@ def generate_natal_chart(
             theme=theme,
             chart_language=language,
         )
-        svg_string = drawer.generate_svg_string()
+        svg_string = get_svg_by_style(drawer, chart_style)
         
         # Save images to files
         image_paths = generate_and_save_images(
             svg_string=svg_string,
-            chart_name=f"natal_{name}",
+            chart_name=f"natal_{chart_style}_{name}",
             output_dir=output_dir,
         )
         result.update(image_paths)
@@ -793,6 +795,162 @@ def get_current_positions(
         }
     
     logger.info("Current positions retrieved")
+    return result
+
+
+@mcp.tool()
+def get_aspects(
+    name: str,
+    year: int,
+    month: int,
+    day: int,
+    hour: int,
+    minute: int,
+    lat: float,
+    lng: float,
+    tz_str: str,
+    house_system: str = "P",
+    zodiac_type: str = "Tropical",
+    sidereal_mode: Optional[str] = None,
+) -> dict:
+    """
+    Get detailed aspect list for a single chart without generating images.
+    
+    Returns all planetary aspects (conjunctions, trines, squares, oppositions, sextiles, etc.)
+    with exact orb values. Useful for AI analysis of chart patterns.
+    
+    Args:
+        name: Name of the chart subject
+        year, month, day: Birth date
+        hour, minute: Birth time
+        lat, lng: Birth coordinates
+        tz_str: IANA timezone
+        house_system: House system identifier
+        zodiac_type: "Tropical" or "Sidereal"
+        sidereal_mode: Required if zodiac_type is "Sidereal" (e.g., "LAHIRI")
+        
+    Returns:
+        dict: Contains:
+        - aspects: List of aspects with planet names, type, and orb
+        - aspect_count: Total count of aspects
+    """
+    logger.info(f"Getting aspects for {name}")
+    
+    house_system = validate_house_system(house_system)
+    sidereal_mode = validate_sidereal_mode(sidereal_mode)
+    
+    subject = AstrologicalSubjectFactory.from_birth_data(
+        name=name,
+        year=year, month=month, day=day,
+        hour=hour, minute=minute,
+        lat=lat, lng=lng, tz_str=tz_str,
+        houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
+        online=False,
+    )
+    
+    aspect_result = AspectsFactory.single_chart_aspects(subject)
+    
+    # Format aspects for AI consumption
+    aspects_list = []
+    for aspect in aspect_result.aspects:
+        aspects_list.append({
+            "planet1": aspect.p1_name,
+            "planet2": aspect.p2_name,
+            "aspect_type": aspect.aspect,
+            "orb": round(aspect.orbit, 2),
+            "aspect_degrees": aspect.aspect_degrees,
+        })
+    
+    result = {
+        "chart_type": "Aspects",
+        "subject_name": name,
+        "aspect_count": len(aspects_list),
+        "aspects": aspects_list,
+    }
+    
+    logger.info(f"Found {len(aspects_list)} aspects for {name}")
+    return result
+
+
+@mcp.tool()
+def get_synastry_aspects(
+    name1: str,
+    year1: int, month1: int, day1: int,
+    hour1: int, minute1: int,
+    lat1: float, lng1: float, tz_str1: str,
+    name2: str,
+    year2: int, month2: int, day2: int,
+    hour2: int, minute2: int,
+    lat2: float, lng2: float, tz_str2: str,
+    house_system: str = "P",
+) -> dict:
+    """
+    Get aspects between two charts (synastry aspects) without generating images.
+    
+    Returns all inter-chart aspects showing how planets in one chart aspect planets
+    in the other. Useful for relationship compatibility analysis.
+    
+    Args:
+        name1: Name of first person
+        year1, month1, day1: Birth date of first person
+        hour1, minute1: Birth time of first person
+        lat1, lng1: Birth coordinates of first person
+        tz_str1: Timezone of first person's birth
+        name2: Name of second person
+        year2, month2, day2: Birth date of second person
+        hour2, minute2: Birth time of second person
+        lat2, lng2: Birth coordinates of second person
+        tz_str2: Timezone of second person's birth
+        house_system: House system identifier
+        
+    Returns:
+        dict: Contains:
+        - aspects: List of inter-chart aspects
+        - aspect_count: Total count of aspects
+    """
+    logger.info(f"Getting synastry aspects for {name1} and {name2}")
+    
+    house_system = validate_house_system(house_system)
+    
+    person1 = AstrologicalSubjectFactory.from_birth_data(
+        name=name1, year=year1, month=month1, day=day1,
+        hour=hour1, minute=minute1,
+        lat=lat1, lng=lng1, tz_str=tz_str1,
+        houses_system_identifier=house_system,
+        online=False,
+    )
+    
+    person2 = AstrologicalSubjectFactory.from_birth_data(
+        name=name2, year=year2, month=month2, day=day2,
+        hour=hour2, minute=minute2,
+        lat=lat2, lng=lng2, tz_str=tz_str2,
+        houses_system_identifier=house_system,
+        online=False,
+    )
+    
+    aspect_result = AspectsFactory.dual_chart_aspects(person1, person2)
+    
+    # Format aspects for AI consumption
+    aspects_list = []
+    for aspect in aspect_result.aspects:
+        aspects_list.append({
+            "planet1": f"{name1}:{aspect.p1_name}",
+            "planet2": f"{name2}:{aspect.p2_name}",
+            "aspect_type": aspect.aspect,
+            "orb": round(aspect.orbit, 2),
+            "aspect_degrees": aspect.aspect_degrees,
+        })
+    
+    result = {
+        "chart_type": "Synastry Aspects",
+        "subjects": [name1, name2],
+        "aspect_count": len(aspects_list),
+        "aspects": aspects_list,
+    }
+    
+    logger.info(f"Found {len(aspects_list)} synastry aspects between {name1} and {name2}")
     return result
 
 
