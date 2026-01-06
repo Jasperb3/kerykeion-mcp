@@ -245,6 +245,7 @@ def generate_synastry_chart(
     include_relationship_score: bool = True,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
+    chart_style: ChartStyle = "full",
 ) -> dict:
     """
     Generate a synastry chart comparing two people for compatibility analysis.
@@ -328,7 +329,7 @@ def generate_synastry_chart(
             theme=theme,
             chart_language=language,
         )
-        svg_string = drawer.generate_svg_string()
+        svg_string = get_svg_by_style(drawer, chart_style)
         
         image_paths = generate_and_save_images(
             svg_string=svg_string,
@@ -360,6 +361,7 @@ def generate_transit_chart(
     house_system: str = "P",
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
+    chart_style: ChartStyle = "full",
 ) -> dict:
     """
     Generate a transit chart showing current (or specified) planetary transits to a natal chart.
@@ -441,7 +443,7 @@ def generate_transit_chart(
             theme=theme,
             chart_language=language,
         )
-        svg_string = drawer.generate_svg_string()
+        svg_string = get_svg_by_style(drawer, chart_style)
         
         image_paths = generate_and_save_images(
             svg_string=svg_string,
@@ -469,6 +471,7 @@ def generate_composite_chart(
     house_system: str = "P",
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
+    chart_style: ChartStyle = "full",
 ) -> dict:
     """
     Generate a composite chart (midpoint composite) for two people.
@@ -543,7 +546,7 @@ def generate_composite_chart(
             theme=theme,
             chart_language=language,
         )
-        svg_string = drawer.generate_svg_string()
+        svg_string = get_svg_by_style(drawer, chart_style)
         
         image_paths = generate_and_save_images(
             svg_string=svg_string,
@@ -569,6 +572,7 @@ def generate_planetary_return(
     house_system: str = "P",
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
+    chart_style: ChartStyle = "full",
 ) -> dict:
     """
     Generate a planetary return chart (Solar Return, Lunar Return)
@@ -654,7 +658,7 @@ def generate_planetary_return(
             theme=theme,
             chart_language=language,
         )
-        svg_string = drawer.generate_svg_string()
+        svg_string = get_svg_by_style(drawer, chart_style)
         
         image_paths = generate_and_save_images(
             svg_string=svg_string,
@@ -678,6 +682,7 @@ def generate_event_chart(
     house_system: str = "P",
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
+    chart_style: ChartStyle = "full",
 ) -> dict:
     """
     Generate an event chart for a specific moment in time (electional, horary, event).
@@ -735,7 +740,7 @@ def generate_event_chart(
             theme=theme,
             chart_language=language,
         )
-        svg_string = drawer.generate_svg_string()
+        svg_string = get_svg_by_style(drawer, chart_style)
         
         image_paths = generate_and_save_images(
             svg_string=svg_string,
