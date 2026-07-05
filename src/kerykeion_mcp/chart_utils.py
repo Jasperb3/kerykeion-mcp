@@ -3,10 +3,13 @@ Utility functions for chart generation and conversion.
 """
 
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+from .validation import ChartInputError
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +120,41 @@ def get_chart_output_dir() -> Path:
     return output_dir
 
 
+def _allowed_output_bases() -> list[Path]:
+    bases = [(Path.home() / ".kerykeion_charts").resolve()]
+    env_base = os.environ.get("KERYKEION_OUTPUT_BASE")
+    if env_base:
+        bases.append(Path(env_base).resolve())
+    return bases
+
+
+def resolve_output_dir(output_dir: Optional[str]) -> Path:
+    """
+    Resolve and confine the requested output directory to an allowed base.
+
+    Without this, a client could ask for a chart to be written to any
+    directory it can reach (output_dir was previously passed straight to
+    Path(...).mkdir with no bounds check). Allowed bases: ~/.kerykeion_charts
+    and, if set, the KERYKEION_OUTPUT_BASE environment variable.
+    """
+    if not output_dir:
+        return get_chart_output_dir()
+
+    requested = Path(output_dir).resolve()
+    bases = _allowed_output_bases()
+    if not any(requested == base or base in requested.parents for base in bases):
+        allowed = ", ".join(str(b) for b in bases)
+        raise ChartInputError(
+            f"output_dir '{output_dir}' is outside the allowed base directories.",
+            hint=(
+                f"Use a path under one of: {allowed}. "
+                "Set KERYKEION_OUTPUT_BASE to allow a different base directory."
+            ),
+        )
+    requested.mkdir(parents=True, exist_ok=True)
+    return requested
+
+
 def generate_and_save_images(
     svg_string: str,
     chart_name: str,
@@ -151,14 +189,9 @@ def generate_and_save_images(
     safe_name = re.sub(r'[^\w\-]', '_', chart_name.lower())
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = f"{safe_name}_{timestamp}"
-    
-    # Use provided output_dir or default
-    if output_dir:
-        out_path = Path(output_dir)
-        out_path.mkdir(parents=True, exist_ok=True)
-    else:
-        out_path = get_chart_output_dir()
-    
+
+    out_path = resolve_output_dir(output_dir)
+
     result = {
         "status": "success",
         "output_dir": str(out_path),

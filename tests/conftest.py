@@ -30,5 +30,6 @@ def birth_london():
 
 
 @pytest.fixture
-def tmp_output_dir(tmp_path):
+def tmp_output_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERYKEION_OUTPUT_BASE", str(tmp_path))
     return str(tmp_path)

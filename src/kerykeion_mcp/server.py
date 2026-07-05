@@ -268,7 +268,8 @@ def generate_natal_chart(
     Returns:
         dict: status, applied_settings (settings actually used), text analysis, and file paths
     """
-    logger.info(f"Generating natal chart for {name}")
+    logger.info("Generating natal chart")
+    logger.debug(f"Subject: {name}")
 
     # Validate inputs
     validate_coordinates(lat, lng)
@@ -327,7 +328,7 @@ def generate_natal_chart(
         )
         result.update(image_paths)
 
-    logger.info(f"Natal chart generated for {name}")
+    logger.info("Natal chart generated")
     return result
 
 
@@ -386,7 +387,8 @@ def generate_synastry_chart(
     Returns:
         dict: Synastry analysis with status, applied_settings, and file paths
     """
-    logger.info(f"Generating synastry chart for {name1} and {name2}")
+    logger.info("Generating synastry chart")
+    logger.debug(f"Subjects: {name1}, {name2}")
 
     validate_coordinates(lat1, lng1, label="Person 1")
     validate_datetime_fields(year1, month1, day1, hour1, minute1, label="Person 1")
@@ -464,7 +466,7 @@ def generate_synastry_chart(
         )
         result.update(image_paths)
     
-    logger.info(f"Synastry chart generated for {name1} and {name2}")
+    logger.info("Synastry chart generated")
     return result
 
 
@@ -524,7 +526,8 @@ def generate_transit_chart(
     Returns:
         dict: Transit analysis with status, applied_settings, and file paths
     """
-    logger.info(f"Generating transit chart for {natal_name}")
+    logger.info("Generating transit chart")
+    logger.debug(f"Natal subject: {natal_name}")
 
     validate_coordinates(natal_lat, natal_lng, label="Natal location")
     validate_datetime_fields(natal_year, natal_month, natal_day, natal_hour, natal_minute, label="Natal date")
@@ -609,7 +612,7 @@ def generate_transit_chart(
         )
         result.update(image_paths)
     
-    logger.info(f"Transit chart generated for {natal_name}")
+    logger.info("Transit chart generated")
     return result
 
 
@@ -669,7 +672,8 @@ def generate_composite_chart(
     Returns:
         dict: Composite chart with status, applied_settings, and file paths
     """
-    logger.info(f"Generating composite chart for {name1} and {name2}")
+    logger.info("Generating composite chart")
+    logger.debug(f"Subjects: {name1}, {name2}")
 
     validate_coordinates(lat1, lng1, label="Person 1")
     validate_datetime_fields(year1, month1, day1, hour1, minute1, label="Person 1")
@@ -742,7 +746,7 @@ def generate_composite_chart(
         )
         result.update(image_paths)
     
-    logger.info(f"Composite chart generated for {name1} and {name2}")
+    logger.info("Composite chart generated")
     return result
 
 
@@ -810,7 +814,8 @@ def generate_planetary_return(
             hint="Valid return types are: Solar, Lunar",
         )
 
-    logger.info(f"Generating {return_type} return for {name}")
+    logger.info(f"Generating {return_type} return")
+    logger.debug(f"Subject: {name}")
 
     validate_coordinates(lat, lng)
     validate_datetime_fields(year, month, day, hour, minute)
@@ -902,7 +907,7 @@ def generate_planetary_return(
         )
         result.update(image_paths)
     
-    logger.info(f"{return_type} return chart generated for {name}")
+    logger.info(f"{return_type} return chart generated")
     return result
 
 
@@ -951,7 +956,8 @@ def generate_event_chart(
     Returns:
         dict: Event chart with status, applied_settings, and file paths
     """
-    logger.info(f"Generating event chart for {event_name}")
+    logger.info("Generating event chart")
+    logger.debug(f"Event: {event_name}")
 
     validate_coordinates(lat, lng)
     validate_datetime_fields(year, month, day, hour, minute)
@@ -1005,7 +1011,7 @@ def generate_event_chart(
         )
         result.update(image_paths)
     
-    logger.info(f"Event chart generated for {event_name}")
+    logger.info("Event chart generated")
     return result
 
 
@@ -1106,7 +1112,8 @@ def get_aspects(
         - aspects: List of aspects with planet names, type, and orb
         - aspect_count: Total count of aspects
     """
-    logger.info(f"Getting aspects for {name}")
+    logger.info("Getting aspects")
+    logger.debug(f"Subject: {name}")
 
     validate_coordinates(lat, lng)
     validate_datetime_fields(year, month, day, hour, minute)
@@ -1148,7 +1155,7 @@ def get_aspects(
         "aspects": aspects_list,
     }
     
-    logger.info(f"Found {len(aspects_list)} aspects for {name}")
+    logger.info(f"Found {len(aspects_list)} aspects")
     return result
 
 
@@ -1193,7 +1200,8 @@ def get_synastry_aspects(
         - aspects: List of inter-chart aspects
         - aspect_count: Total count of aspects
     """
-    logger.info(f"Getting synastry aspects for {name1} and {name2}")
+    logger.info("Getting synastry aspects")
+    logger.debug(f"Subjects: {name1}, {name2}")
 
     validate_coordinates(lat1, lng1, label="Person 1")
     validate_datetime_fields(year1, month1, day1, hour1, minute1, label="Person 1")
@@ -1247,7 +1255,7 @@ def get_synastry_aspects(
         "aspects": aspects_list,
     }
     
-    logger.info(f"Found {len(aspects_list)} synastry aspects between {name1} and {name2}")
+    logger.info(f"Found {len(aspects_list)} synastry aspects")
     return result
 
 
@@ -1257,23 +1265,37 @@ def get_synastry_aspects(
 
 def main():
     """Start the MCP server."""
-    import sys
-    
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Kerykeion MCP Server")
+    parser.add_argument("--sse", action="store_true", help="Serve legacy HTTP+SSE transport (deprecated)")
+    parser.add_argument("--http", action="store_true", help="Serve Streamable HTTP transport")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind HTTP transports to (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind HTTP transports to (default: 8000)")
+    args = parser.parse_args()
+
     logger.info("Starting Kerykeion MCP Server")
     logger.info(f"PNG conversion available: {HAS_CAIROSVG}")
 
-    if "--sse" in sys.argv:
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning(
+            f"Binding to non-loopback host {args.host} exposes this server -- which "
+            "accepts birth data (PII) and writes files -- to your network. Only do "
+            "this on a trusted network, and prefer a tunnel over a public bind."
+        )
+
+    if args.sse:
         # Legacy HTTP+SSE transport, deprecated by the MCP spec (2025-03-26)
         # in favor of Streamable HTTP. Kept for backward compatibility.
         import uvicorn
         logger.warning("--sse uses the deprecated HTTP+SSE transport; prefer --http (Streamable HTTP)")
-        logger.info("Running with HTTP+SSE transport on http://0.0.0.0:8000")
-        logger.info("SSE endpoint: http://localhost:8000/sse")
-        uvicorn.run(mcp.sse_app(), host="0.0.0.0", port=8000)
-    elif "--http" in sys.argv:
+        logger.info(f"Running with HTTP+SSE transport on http://{args.host}:{args.port}")
+        logger.info(f"SSE endpoint: http://{args.host}:{args.port}/sse")
+        uvicorn.run(mcp.sse_app(), host=args.host, port=args.port)
+    elif args.http:
         import uvicorn
-        logger.info("Running with Streamable HTTP transport on http://0.0.0.0:8000")
-        uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=8000)
+        logger.info(f"Running with Streamable HTTP transport on http://{args.host}:{args.port}")
+        uvicorn.run(mcp.streamable_http_app(), host=args.host, port=args.port)
     else:
         # Default: stdio transport for Claude Desktop
         logger.info("Running with stdio transport (use --http for HTTP mode)")
