@@ -2,10 +2,9 @@
 Utility functions for chart generation and conversion.
 """
 
-import base64
 import logging
 import re
-import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -109,44 +108,6 @@ def svg_to_png(svg_string: str, width: int = 1600, scale: float = 2.0) -> Option
 
 
 
-def svg_to_base64(svg_string: str) -> str:
-    """Encode SVG string to base64 data URI."""
-    encoded = base64.b64encode(svg_string.encode('utf-8')).decode('utf-8')
-    return f"data:image/svg+xml;base64,{encoded}"
-
-
-def png_to_base64(png_bytes: bytes) -> str:
-    """Encode PNG bytes to base64 data URI."""
-    encoded = base64.b64encode(png_bytes).decode('utf-8')
-    return f"data:image/png;base64,{encoded}"
-
-
-def save_chart_file(content: str | bytes, filename: str, output_dir: Optional[Path] = None) -> Path:
-    """
-    Save chart content to a file.
-    
-    Args:
-        content: SVG string or PNG bytes
-        filename: Desired filename (with extension)
-        output_dir: Directory to save to (defaults to temp directory)
-        
-    Returns:
-        Path to saved file
-    """
-    if output_dir is None:
-        output_dir = Path(tempfile.gettempdir()) / "kerykeion_charts"
-    
-    output_dir.mkdir(parents=True, exist_ok=True)
-    filepath = output_dir / filename
-    
-    if isinstance(content, bytes):
-        filepath.write_bytes(content)
-    else:
-        filepath.write_text(content, encoding='utf-8')
-    
-    return filepath
-
-
 # Default output directory for charts
 def get_chart_output_dir() -> Path:
     """Get the default output directory for chart files."""
@@ -186,9 +147,6 @@ def generate_and_save_images(
         - output_dir: Directory where files were saved
         - summary: Human-readable success message
     """
-    import re
-    from datetime import datetime
-    
     # Sanitize chart name for filename
     safe_name = re.sub(r'[^\w\-]', '_', chart_name.lower())
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -230,85 +188,5 @@ def generate_and_save_images(
         f"Chart generated successfully. "
         f"SVG: {svg_path_str or 'N/A'}, PNG: {png_path_str or 'N/A'}"
     )
-    
+
     return result
-
-
-
-# Validation helpers
-VALID_THEMES = ["classic", "light", "dark", "strawberry", "dark-high-contrast"]
-VALID_LANGUAGES = ["EN", "IT", "FR", "ES", "PT", "CN", "RU", "TR", "DE", "HI"]
-VALID_HOUSE_SYSTEMS = {
-    "P": "Placidus",
-    "W": "Whole Sign", 
-    "K": "Koch",
-    "A": "Equal",
-    "C": "Campanus",
-    "R": "Regiomontanus",
-    "M": "Morinus",
-    "O": "Porphyry",
-    "G": "Gauquelin (Sectors)",
-}
-VALID_ZODIAC_TYPES = ["Tropical", "Sidereal"]
-VALID_SIDEREAL_MODES = [
-    "FAGAN_BRADLEY", "LAHIRI", "DELUCE", "RAMAN", "USHASHASHI", 
-    "KRISHNAMURTI", "DJWHAL_KHOOL", "YUKTESWAR", "JN_BHASIN", "HINDU_LAHIRI"
-]
-VALID_PERSPECTIVE_TYPES = ["Apparent Geocentric", "Heliocentric", "Topocentric"]
-VALID_CHART_STYLES = ["full", "wheel_only", "aspect_grid"]
-
-
-def validate_theme(theme: str) -> str:
-    """Validate and return theme, defaulting to 'classic'."""
-    if theme.lower() in VALID_THEMES:
-        return theme.lower()
-    logger.warning(f"Invalid theme '{theme}', using 'classic'")
-    return "classic"
-
-
-def validate_language(language: str) -> str:
-    """Validate and return language, defaulting to 'EN'."""
-    lang_upper = language.upper()
-    if lang_upper in VALID_LANGUAGES:
-        return lang_upper
-    logger.warning(f"Invalid language '{language}', using 'EN'")
-    return "EN"
-
-
-def validate_house_system(house_system: str) -> str:
-    """Validate and return house system identifier, defaulting to 'P' (Placidus)."""
-    hs_upper = house_system.upper()
-    if hs_upper in VALID_HOUSE_SYSTEMS:
-        return hs_upper
-    logger.warning(f"Invalid house system '{house_system}', using 'P' (Placidus)")
-    return "P"
-
-
-def validate_sidereal_mode(sidereal_mode: Optional[str]) -> Optional[str]:
-    """Validate sidereal mode, returns None if invalid."""
-    if sidereal_mode is None:
-        return None
-    mode_upper = sidereal_mode.upper()
-    if mode_upper in VALID_SIDEREAL_MODES:
-        return mode_upper
-    logger.warning(f"Invalid sidereal mode '{sidereal_mode}', ignoring")
-    return None
-
-
-def validate_perspective_type(perspective_type: str) -> str:
-    """Validate perspective type, defaulting to 'Apparent Geocentric'."""
-    # Allow partial/case-insensitive matching
-    pt_lower = perspective_type.lower()
-    for valid in VALID_PERSPECTIVE_TYPES:
-        if pt_lower == valid.lower() or pt_lower in valid.lower():
-            return valid
-    logger.warning(f"Invalid perspective type '{perspective_type}', using 'Apparent Geocentric'")
-    return "Apparent Geocentric"
-
-
-def validate_chart_style(chart_style: str) -> str:
-    """Validate chart style."""
-    if chart_style.lower() in VALID_CHART_STYLES:
-        return chart_style.lower()
-    logger.warning(f"Invalid chart style '{chart_style}', using 'full'")
-    return "full"

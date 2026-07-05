@@ -6,10 +6,12 @@ capabilities using the Kerykeion library. Works with Claude Desktop and
 ChatGPT Desktop via standard MCP transport.
 """
 
+import functools
 import logging
 from datetime import datetime
 from typing import Optional, Literal
 
+import pytz
 from mcp.server.fastmcp import FastMCP
 from kerykeion import (
     AstrologicalSubjectFactory,
@@ -18,30 +20,84 @@ from kerykeion import (
     CompositeSubjectFactory,
     PlanetaryReturnFactory,
     AspectsFactory,
+    KerykeionException,
     to_context,
 )
 
 from .chart_utils import (
     generate_and_save_images,
+    HAS_CAIROSVG,
+)
+from .validation import (
+    ChartInputError,
     validate_theme,
     validate_language,
     validate_house_system,
     validate_sidereal_mode,
-    validate_perspective_type,
     validate_chart_style,
-    HAS_CAIROSVG,
-    VALID_THEMES,
-    VALID_LANGUAGES,
+    validate_zodiac_type,
+    validate_coordinates,
+    validate_datetime_fields,
+    validate_timezone,
     VALID_HOUSE_SYSTEMS,
-    VALID_SIDEREAL_MODES,
-    VALID_PERSPECTIVE_TYPES,
-    VALID_CHART_STYLES,
-    get_chart_output_dir,
 )
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def handle_chart_errors(func):
+    """
+    Catch input/library errors and return a structured error response instead
+    of letting a raw traceback reach the MCP client. Unknown exceptions are
+    still logged with a full traceback server-side.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except ChartInputError as e:
+            return {"status": "error", "error": e.message, "hint": e.hint}
+        except pytz.exceptions.UnknownTimeZoneError as e:
+            return {"status": "error", "error": f"Unknown timezone: {e}", "hint": ""}
+        except KerykeionException as e:
+            return {"status": "error", "error": str(e), "hint": ""}
+        except ValueError as e:
+            return {"status": "error", "error": str(e), "hint": ""}
+        except Exception as e:
+            logger.exception(f"Internal error in {func.__name__}")
+            return {
+                "status": "error",
+                "error": f"Internal error generating chart: {type(e).__name__}",
+                "hint": "Check server logs.",
+            }
+
+    return wrapper
+
+
+def build_applied_settings(
+    house_system: str,
+    zodiac_type: str = "Tropical",
+    sidereal_mode: Optional[str] = None,
+    theme: Optional[str] = None,
+    language: Optional[str] = None,
+    chart_style: Optional[str] = None,
+) -> dict:
+    """Build the applied_settings block echoing exactly what was computed."""
+    settings = {
+        "house_system": f"{house_system} ({VALID_HOUSE_SYSTEMS[house_system]})",
+        "zodiac_type": zodiac_type,
+        "sidereal_mode": sidereal_mode,
+    }
+    if theme is not None:
+        settings["theme"] = theme
+    if language is not None:
+        settings["language"] = language
+    if chart_style is not None:
+        settings["chart_style"] = chart_style
+    return settings
 
 # Server instructions for AI assistants
 SERVER_INSTRUCTIONS = """
@@ -136,6 +192,7 @@ def get_svg_by_style(drawer: ChartDrawer, chart_style: str) -> str:
 
 
 @mcp.tool()
+@handle_chart_errors
 def generate_natal_chart(
     name: str,
     year: int,
@@ -156,7 +213,7 @@ def generate_natal_chart(
 ) -> dict:
     """
     Generate a natal (birth) chart for an individual.
-    
+
     Args:
         name: Name or identifier for the chart subject
         year: Birth year (e.g., 1990)
@@ -174,18 +231,22 @@ def generate_natal_chart(
         output_format: "text" (text only), "images" (text + save images), or "all"
         output_dir: Directory to save chart images (optional)
         chart_style: "full" (complete chart), "wheel_only" (just the wheel), "aspect_grid" (just aspects table)
-        
+
     Returns:
-        dict: Contains text analysis and file paths to saved images
+        dict: status, applied_settings (settings actually used), text analysis, and file paths
     """
     logger.info(f"Generating natal chart for {name}")
-    
+
     # Validate inputs
+    validate_coordinates(lat, lng)
+    validate_datetime_fields(year, month, day, hour, minute)
+    validate_timezone(tz_str)
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
     chart_style = validate_chart_style(chart_style)
-    
+    zodiac_type = validate_zodiac_type(zodiac_type)
+
     # Create astrological subject
     subject = AstrologicalSubjectFactory.from_birth_data(
         name=name,
@@ -196,18 +257,22 @@ def generate_natal_chart(
         zodiac_type=zodiac_type,
         online=False,
     )
-    
+
     # Create chart data
     chart_data = ChartDataFactory.create_natal_chart_data(subject)
-    
+
     # Build response
     result = {
+        "status": "success",
         "chart_type": "Natal",
         "chart_style": chart_style,
         "subject_name": name,
+        "applied_settings": build_applied_settings(
+            house_system, zodiac_type, theme=theme, language=language, chart_style=chart_style
+        ),
         "text": to_context(chart_data),
     }
-    
+
     # Generate and save images if requested
     if output_format in ("images", "all"):
         drawer = ChartDrawer(
@@ -216,7 +281,7 @@ def generate_natal_chart(
             chart_language=language,
         )
         svg_string = get_svg_by_style(drawer, chart_style)
-        
+
         # Save images to files
         image_paths = generate_and_save_images(
             svg_string=svg_string,
@@ -224,12 +289,13 @@ def generate_natal_chart(
             output_dir=output_dir,
         )
         result.update(image_paths)
-    
+
     logger.info(f"Natal chart generated for {name}")
     return result
 
 
 @mcp.tool()
+@handle_chart_errors
 def generate_synastry_chart(
     name1: str,
     year1: int, month1: int, day1: int,
@@ -282,11 +348,17 @@ def generate_synastry_chart(
         dict: Synastry analysis with status, summary, and file paths
     """
     logger.info(f"Generating synastry chart for {name1} and {name2}")
-    
+
+    validate_coordinates(lat1, lng1, label="Person 1")
+    validate_datetime_fields(year1, month1, day1, hour1, minute1, label="Person 1")
+    validate_timezone(tz_str1, label="Person 1")
+    validate_coordinates(lat2, lng2, label="Person 2")
+    validate_datetime_fields(year2, month2, day2, hour2, minute2, label="Person 2")
+    validate_timezone(tz_str2, label="Person 2")
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
-    
+
     # Create both subjects
     person1 = AstrologicalSubjectFactory.from_birth_data(
         name=name1, year=year1, month=month1, day=day1,
@@ -295,7 +367,7 @@ def generate_synastry_chart(
         houses_system_identifier=house_system,
         online=False,
     )
-    
+
     person2 = AstrologicalSubjectFactory.from_birth_data(
         name=name2, year=year2, month=month2, day=day2,
         hour=hour2, minute=minute2,
@@ -303,7 +375,7 @@ def generate_synastry_chart(
         houses_system_identifier=house_system,
         online=False,
     )
-    
+
     # Create synastry chart data
     synastry_data = ChartDataFactory.create_synastry_chart_data(
         first_subject=person1,
@@ -311,10 +383,14 @@ def generate_synastry_chart(
         include_house_comparison=True,
         include_relationship_score=include_relationship_score,
     )
-    
+
     result = {
+        "status": "success",
         "chart_type": "Synastry",
         "subjects": [name1, name2],
+        "applied_settings": build_applied_settings(
+            house_system, theme=theme, language=language, chart_style=chart_style
+        ),
         "text": to_context(synastry_data),
     }
     
@@ -343,6 +419,7 @@ def generate_synastry_chart(
 
 
 @mcp.tool()
+@handle_chart_errors
 def generate_transit_chart(
     natal_name: str,
     natal_year: int, natal_month: int, natal_day: int,
@@ -392,11 +469,18 @@ def generate_transit_chart(
         dict: Transit analysis with status, summary, and file paths
     """
     logger.info(f"Generating transit chart for {natal_name}")
-    
+
+    validate_coordinates(natal_lat, natal_lng, label="Natal location")
+    validate_datetime_fields(natal_year, natal_month, natal_day, natal_hour, natal_minute, label="Natal date")
+    validate_timezone(natal_tz_str, label="Natal timezone")
+    validate_coordinates(transit_lat, transit_lng, label="Transit location")
+    validate_timezone(transit_tz_str, label="Transit timezone")
+    if all(v is not None for v in [transit_year, transit_month, transit_day, transit_hour, transit_minute]):
+        validate_datetime_fields(transit_year, transit_month, transit_day, transit_hour, transit_minute, label="Transit date")
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
-    
+
     # Create natal subject
     natal = AstrologicalSubjectFactory.from_birth_data(
         name=natal_name,
@@ -430,9 +514,13 @@ def generate_transit_chart(
     )
     
     result = {
+        "status": "success",
         "chart_type": "Transit",
         "natal_subject": natal_name,
         "transit_time": str(transit.utc_time) if hasattr(transit, 'utc_time') else "current",
+        "applied_settings": build_applied_settings(
+            house_system, theme=theme, language=language, chart_style=chart_style
+        ),
         "text": to_context(transit_data),
     }
     
@@ -457,6 +545,7 @@ def generate_transit_chart(
 
 
 @mcp.tool()
+@handle_chart_errors
 def generate_composite_chart(
     name1: str,
     year1: int, month1: int, day1: int,
@@ -504,11 +593,17 @@ def generate_composite_chart(
         dict: Composite chart with status, summary, and file paths
     """
     logger.info(f"Generating composite chart for {name1} and {name2}")
-    
+
+    validate_coordinates(lat1, lng1, label="Person 1")
+    validate_datetime_fields(year1, month1, day1, hour1, minute1, label="Person 1")
+    validate_timezone(tz_str1, label="Person 1")
+    validate_coordinates(lat2, lng2, label="Person 2")
+    validate_datetime_fields(year2, month2, day2, hour2, minute2, label="Person 2")
+    validate_timezone(tz_str2, label="Person 2")
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
-    
+
     # Create both subjects
     person1 = AstrologicalSubjectFactory.from_birth_data(
         name=name1, year=year1, month=month1, day=day1,
@@ -534,8 +629,12 @@ def generate_composite_chart(
     composite_data = ChartDataFactory.create_composite_chart_data(composite_subject)
     
     result = {
+        "status": "success",
         "chart_type": "Composite",
         "subjects": [name1, name2],
+        "applied_settings": build_applied_settings(
+            house_system, theme=theme, language=language, chart_style=chart_style
+        ),
         "text": to_context(composite_data),
     }
     
@@ -560,6 +659,7 @@ def generate_composite_chart(
 
 
 @mcp.tool()
+@handle_chart_errors
 def generate_planetary_return(
     name: str,
     year: int, month: int, day: int,
@@ -601,19 +701,24 @@ def generate_planetary_return(
     Returns:
         dict: Return chart with status, summary, and file paths
     """
-    # Validate return_type
     if return_type not in ("Solar", "Lunar"):
-        return_type = "Solar"
-    
+        raise ChartInputError(
+            f"Invalid return_type '{return_type}'.",
+            hint="Valid return types are: Solar, Lunar",
+        )
+
     logger.info(f"Generating {return_type} return for {name}")
-    
+
+    validate_coordinates(lat, lng)
+    validate_datetime_fields(year, month, day, hour, minute)
+    validate_timezone(tz_str)
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
-    
+
     if return_year is None:
         return_year = datetime.now().year
-    
+
     # Create natal subject
     natal = AstrologicalSubjectFactory.from_birth_data(
         name=name,
@@ -644,10 +749,14 @@ def generate_planetary_return(
     return_data = ChartDataFactory.create_natal_chart_data(return_model)
     
     result = {
+        "status": "success",
         "chart_type": f"{return_type} Return",
         "subject_name": name,
         "return_year": return_year,
         "return_date": return_model.iso_formatted_local_datetime if hasattr(return_model, 'iso_formatted_local_datetime') else None,
+        "applied_settings": build_applied_settings(
+            house_system, theme=theme, language=language, chart_style=chart_style
+        ),
         "text": to_context(return_data),
     }
     
@@ -672,6 +781,7 @@ def generate_planetary_return(
 
 
 @mcp.tool()
+@handle_chart_errors
 def generate_event_chart(
     event_name: str,
     year: int, month: int, day: int,
@@ -710,11 +820,14 @@ def generate_event_chart(
         dict: Event chart with status, summary, and file paths
     """
     logger.info(f"Generating event chart for {event_name}")
-    
+
+    validate_coordinates(lat, lng)
+    validate_datetime_fields(year, month, day, hour, minute)
+    validate_timezone(tz_str)
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
-    
+
     # Create subject for the event moment
     event_subject = AstrologicalSubjectFactory.from_birth_data(
         name=event_name,
@@ -728,8 +841,12 @@ def generate_event_chart(
     chart_data = ChartDataFactory.create_natal_chart_data(event_subject)
     
     result = {
+        "status": "success",
         "chart_type": "Event",
         "event_name": event_name,
+        "applied_settings": build_applied_settings(
+            house_system, theme=theme, language=language, chart_style=chart_style
+        ),
         "text": to_context(chart_data),
     }
     
@@ -754,6 +871,7 @@ def generate_event_chart(
 
 
 @mcp.tool()
+@handle_chart_errors
 def get_current_positions(
     lat: float,
     lng: float,
@@ -776,19 +894,23 @@ def get_current_positions(
         Dictionary with current planetary positions as text
     """
     logger.info(f"Getting current positions for lat={lat}, lng={lng}")
-    
+
+    validate_coordinates(lat, lng)
+    validate_timezone(tz_str)
     language = validate_language(language)
-    
+
     # Create subject for current time
     now = AstrologicalSubjectFactory.from_current_time(
         name="Current Positions",
         lat=lat, lng=lng, tz_str=tz_str,
         online=False,
     )
-    
+
     result = {
+        "status": "success",
         "chart_type": "Current Positions",
         "timestamp": str(now.utc_time) if hasattr(now, 'utc_time') else "current",
+        "applied_settings": build_applied_settings("P", language=language),
         "text": to_context(now),
     }
     
@@ -804,6 +926,7 @@ def get_current_positions(
 
 
 @mcp.tool()
+@handle_chart_errors
 def get_aspects(
     name: str,
     year: int,
@@ -840,10 +963,14 @@ def get_aspects(
         - aspect_count: Total count of aspects
     """
     logger.info(f"Getting aspects for {name}")
-    
+
+    validate_coordinates(lat, lng)
+    validate_datetime_fields(year, month, day, hour, minute)
+    validate_timezone(tz_str)
     house_system = validate_house_system(house_system)
-    sidereal_mode = validate_sidereal_mode(sidereal_mode)
-    
+    zodiac_type = validate_zodiac_type(zodiac_type)
+    sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
+
     subject = AstrologicalSubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
@@ -869,8 +996,10 @@ def get_aspects(
         })
     
     result = {
+        "status": "success",
         "chart_type": "Aspects",
         "subject_name": name,
+        "applied_settings": build_applied_settings(house_system, zodiac_type, sidereal_mode),
         "aspect_count": len(aspects_list),
         "aspects": aspects_list,
     }
@@ -880,6 +1009,7 @@ def get_aspects(
 
 
 @mcp.tool()
+@handle_chart_errors
 def get_synastry_aspects(
     name1: str,
     year1: int, month1: int, day1: int,
@@ -916,9 +1046,15 @@ def get_synastry_aspects(
         - aspect_count: Total count of aspects
     """
     logger.info(f"Getting synastry aspects for {name1} and {name2}")
-    
+
+    validate_coordinates(lat1, lng1, label="Person 1")
+    validate_datetime_fields(year1, month1, day1, hour1, minute1, label="Person 1")
+    validate_timezone(tz_str1, label="Person 1")
+    validate_coordinates(lat2, lng2, label="Person 2")
+    validate_datetime_fields(year2, month2, day2, hour2, minute2, label="Person 2")
+    validate_timezone(tz_str2, label="Person 2")
     house_system = validate_house_system(house_system)
-    
+
     person1 = AstrologicalSubjectFactory.from_birth_data(
         name=name1, year=year1, month=month1, day=day1,
         hour=hour1, minute=minute1,
@@ -949,8 +1085,10 @@ def get_synastry_aspects(
         })
     
     result = {
+        "status": "success",
         "chart_type": "Synastry Aspects",
         "subjects": [name1, name2],
+        "applied_settings": build_applied_settings(house_system),
         "aspect_count": len(aspects_list),
         "aspects": aspects_list,
     }
