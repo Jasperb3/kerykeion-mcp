@@ -131,14 +131,26 @@ All tools operate in OFFLINE mode - you must provide:
 - Longitude (lng): Positive for East, negative for West
 - Timezone (tz_str): IANA timezone format (e.g., "Europe/Rome", "America/New_York")
 
-Output formats:
-- "text": AI-readable text description (always included)
-- "svg": SVG chart image as base64 data URI
-- "png": PNG chart image as base64 data URI (if cairosvg available)
-- "all": All available formats
+Output formats (output_format parameter):
+- "text": AI-readable text description only
+- "images": text plus SVG/PNG files saved to disk (paths returned as svg_path/png_path)
+- "all": text and images
 
-Common timezones: UTC, Europe/London, Europe/Paris, Europe/Rome, 
+Every response includes a "status" field ("success" or "error") and, on
+success, an "applied_settings" block reporting exactly which house system,
+zodiac type, and sidereal mode were used -- never assume a requested setting
+was honored without checking it there. On error, the response includes an
+educational "error" message and "hint" instead of a raw exception.
+
+Common timezones: UTC, Europe/London, Europe/Paris, Europe/Rome,
 America/New_York, America/Los_Angeles, Asia/Tokyo, Australia/Sydney
+
+Interpretation framing: present challenging aspects and hard placements as
+developmental invitations, not verdicts or predictions of doom. Never offer
+medical, legal, or fatalistic ("you will die/divorce/fail") predictions from
+a chart. House-dependent claims (Ascendant, house placements, angles) require
+a confident birth time -- flag uncertainty when the birth time is approximate
+or unknown rather than presenting house-based claims as fact.
 """
 
 # Create MCP server instance
@@ -385,6 +397,7 @@ def generate_synastry_chart(
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
+    chart_style = validate_chart_style(chart_style)
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
     city1, nation1 = resolve_location(city1, nation1, lat1, lng1)
@@ -523,6 +536,7 @@ def generate_transit_chart(
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
+    chart_style = validate_chart_style(chart_style)
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
     natal_city, natal_nation = resolve_location(natal_city, natal_nation, natal_lat, natal_lng)
@@ -666,6 +680,7 @@ def generate_composite_chart(
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
+    chart_style = validate_chart_style(chart_style)
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
     city1, nation1 = resolve_location(city1, nation1, lat1, lng1)
@@ -803,6 +818,7 @@ def generate_planetary_return(
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
+    chart_style = validate_chart_style(chart_style)
     city, nation = resolve_location(city, nation, lat, lng)
 
     search_lat = return_lat if return_lat is not None else lat
@@ -943,6 +959,7 @@ def generate_event_chart(
     theme = validate_theme(theme)
     language = validate_language(language)
     house_system = validate_house_system(house_system)
+    chart_style = validate_chart_style(chart_style)
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
     city, nation = resolve_location(city, nation, lat, lng)
@@ -1244,17 +1261,22 @@ def main():
     
     logger.info("Starting Kerykeion MCP Server")
     logger.info(f"PNG conversion available: {HAS_CAIROSVG}")
-    
-    # Check for --sse flag for SSE transport (ChatGPT/remote)
-    if "--sse" in sys.argv or "--http" in sys.argv:
-        # Use streamable HTTP transport with uvicorn
+
+    if "--sse" in sys.argv:
+        # Legacy HTTP+SSE transport, deprecated by the MCP spec (2025-03-26)
+        # in favor of Streamable HTTP. Kept for backward compatibility.
         import uvicorn
-        logger.info("Running with HTTP transport on http://0.0.0.0:8000")
+        logger.warning("--sse uses the deprecated HTTP+SSE transport; prefer --http (Streamable HTTP)")
+        logger.info("Running with HTTP+SSE transport on http://0.0.0.0:8000")
         logger.info("SSE endpoint: http://localhost:8000/sse")
         uvicorn.run(mcp.sse_app(), host="0.0.0.0", port=8000)
+    elif "--http" in sys.argv:
+        import uvicorn
+        logger.info("Running with Streamable HTTP transport on http://0.0.0.0:8000")
+        uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=8000)
     else:
         # Default: stdio transport for Claude Desktop
-        logger.info("Running with stdio transport (use --sse for HTTP mode)")
+        logger.info("Running with stdio transport (use --http for HTTP mode)")
         mcp.run(transport="stdio")
 
 
