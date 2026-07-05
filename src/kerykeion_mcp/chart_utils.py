@@ -21,6 +21,12 @@ except ImportError:
     HAS_CAIROSVG = False
     logger.warning("cairosvg not available - PNG conversion disabled")
 
+# Sized for high-DPI display in chat clients (Claude Desktop, ChatGPT).
+PNG_OUTPUT_WIDTH = 1600
+# Prevents infinite loops when CSS variables reference each other.
+CSS_VAR_RESOLVE_MAX_DEPTH = 10
+CSS_VAR_FALLBACK_COLOR = "#000000"
+
 
 def resolve_css_variables(svg_string: str) -> str:
     """
@@ -45,26 +51,25 @@ def resolve_css_variables(svg_string: str) -> str:
     
     # First, resolve nested variable references in the definitions themselves
     # Some variables reference other variables, e.g., --foo: var(--bar)
-    max_iterations = 10  # Prevent infinite loops
-    for _ in range(max_iterations):
+    for _ in range(CSS_VAR_RESOLVE_MAX_DEPTH):
         updated = False
         for var_name, var_value in var_defs.items():
             if 'var(--' in var_value:
                 # Replace var(--xxx) with the actual value
                 def resolve_nested(match):
                     ref_name = match.group(1)
-                    return var_defs.get(ref_name, '#000000')
+                    return var_defs.get(ref_name, CSS_VAR_FALLBACK_COLOR)
                 new_value = re.sub(r'var\(--([\w-]+)\)', resolve_nested, var_value)
                 if new_value != var_value:
                     var_defs[var_name] = new_value
                     updated = True
         if not updated:
             break
-    
+
     # Now replace var(--name) with actual values in the SVG
     def replace_var(match):
         var_name = match.group(1)
-        return var_defs.get(var_name, '#000000')  # fallback to black
+        return var_defs.get(var_name, CSS_VAR_FALLBACK_COLOR)
     
     # Multiple passes to catch any remaining nested references
     resolved = svg_string
@@ -78,30 +83,31 @@ def resolve_css_variables(svg_string: str) -> str:
     return resolved
 
 
-def svg_to_png(svg_string: str, width: int = 1600, scale: float = 2.0) -> Optional[bytes]:
+def svg_to_png(svg_string: str, width: int = PNG_OUTPUT_WIDTH) -> Optional[bytes]:
     """
     Convert SVG string to PNG bytes.
-    
+
     Args:
         svg_string: SVG content as string
         width: Output width in pixels (height auto-calculated). Default 1600px.
-        scale: Scale factor for higher DPI (2.0 = 192 DPI effective). Default 2.0.
-        
+
     Returns:
         PNG bytes if conversion successful, None otherwise
     """
     if not HAS_CAIROSVG:
         logger.warning("PNG conversion not available - cairosvg not installed")
         return None
-    
+
     try:
         # Resolve CSS variables for CairoSVG compatibility
         svg_resolved = resolve_css_variables(svg_string)
-        
+
+        # Note: cairosvg gives output_width precedence over scale, so scale
+        # is a no-op here (verified empirically) -- width alone controls
+        # the resolution.
         png_bytes = cairosvg.svg2png(
             bytestring=svg_resolved.encode('utf-8'),
             output_width=width,
-            scale=scale,
             background_color='white'
         )
         return png_bytes
