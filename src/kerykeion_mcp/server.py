@@ -765,6 +765,7 @@ def generate_planetary_return(
     return_lat: Optional[float] = None,
     return_lng: Optional[float] = None,
     return_tz_str: Optional[str] = None,
+    return_city: str = "", return_nation: str = "",
     theme: str = "classic",
     language: str = "EN",
     house_system: str = "P",
@@ -798,6 +799,9 @@ def generate_planetary_return(
             backward compatibility)
         return_lat, return_lng, return_tz_str: Location to cast the return chart for
             (defaults to birth location if omitted)
+        return_city, return_nation: Label for the return location (optional, chart
+            labeling only). If omitted, a relocated return is labeled with its
+            coordinates; a non-relocated return keeps the birth location label.
         theme: Chart theme
         language: Chart language (default: EN)
         house_system: House system identifier
@@ -833,6 +837,16 @@ def generate_planetary_return(
         validate_coordinates(search_lat, search_lng, label="Return location")
     if return_tz_str is not None:
         validate_timezone(search_tz_str, label="Return timezone")
+
+    # Label the return chart with the *return* location: an explicit
+    # return_city wins; a relocated return without one gets a coordinate
+    # label; a non-relocated return keeps the birth label.
+    if not return_city and return_lat is None and return_lng is None:
+        return_city_label, return_nation_label = city, nation
+    else:
+        return_city_label, return_nation_label = resolve_location(
+            return_city, return_nation, search_lat, search_lng
+        )
 
     # Default to today's date (needed for lunar returns, which recur every
     # ~27.3 days -- searching from Jan 1 would return January's lunar return
@@ -875,10 +889,21 @@ def generate_planetary_return(
         day=return_day,
         return_type=return_type,
     )
-    
-    # PlanetReturnModel IS the subject itself (has all planetary positions)
-    return_data = ChartDataFactory.create_natal_chart_data(return_model)
-    
+
+    # The factory only locates the moment of exactitude -- the subject it
+    # builds ignores the requested house system (always Placidus). Rebuild
+    # the return subject at that moment with the settings actually requested,
+    # so applied_settings stays truthful by construction.
+    return_subject = AstrologicalSubjectFactory.from_iso_utc_time(
+        name=f"{name} {return_type} Return",
+        iso_utc_time=return_model.iso_formatted_utc_datetime,
+        lat=search_lat, lng=search_lng, tz_str=search_tz_str,
+        city=return_city_label, nation=return_nation_label,
+        houses_system_identifier=house_system,
+        online=False,
+    )
+    return_data = ChartDataFactory.create_natal_chart_data(return_subject)
+
     result = {
         "status": "success",
         "chart_type": f"{return_type} Return",

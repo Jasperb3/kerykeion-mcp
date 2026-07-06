@@ -74,6 +74,47 @@ def test_lunar_return_without_explicit_date_returns_near_today(birth_rome):
     assert return_date - datetime.now() < timedelta(days=28)
 
 
+def test_return_chart_honors_whole_sign_house_system(birth_rome):
+    # K1: the factory-built return subject always came back Placidus; the
+    # rebuilt subject must actually be Whole Sign, not just claim it.
+    result = generate_planetary_return(
+        **birth_rome, return_type="Solar", return_year=2020,
+        house_system="W", output_format="text",
+    )
+    assert result["status"] == "success"
+    assert result["applied_settings"]["house_system"] == "W (Whole Sign)"
+    assert "House system: equal/ whole sign" in result["text"]
+
+
+def test_return_date_unchanged_by_subject_rebuild(birth_rome):
+    # K1 regression pin: rebuilding the return subject must not shift the
+    # moment of exactitude found by the factory (pre-fix golden value).
+    result = generate_planetary_return(
+        **birth_rome, return_type="Solar", return_year=2020, output_format="text",
+    )
+    assert result["status"] == "success"
+    assert result["return_date"] == "2020-06-14T20:41:15+02:00"
+
+
+def test_relocated_lunar_return_carries_return_location_label(birth_rome):
+    # K1: a relocated return must be labeled with the return location, not the
+    # birth city, and its house cusps must differ from the birth-location cast.
+    common = dict(
+        **birth_rome, city="Rome", nation="IT", return_type="Lunar",
+        return_year=2026, return_month=7, return_day=1, output_format="text",
+    )
+    birth_location = generate_planetary_return(**common)
+    relocated = generate_planetary_return(
+        **common,
+        return_lat=51.5074, return_lng=-0.1278, return_tz_str="Europe/London",
+    )
+    assert birth_location["status"] == "success"
+    assert relocated["status"] == "success"
+    assert relocated["text"] != birth_location["text"]
+    assert "51.51N, 0.13W" in relocated["text"]
+    assert "51.51N" not in birth_location["text"]
+
+
 def test_solar_return_with_relocation_differs_from_birth_location(birth_rome):
     birth_location = generate_planetary_return(
         **birth_rome, return_type="Solar", return_year=2020, output_format="text"
