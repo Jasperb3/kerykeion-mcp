@@ -11,6 +11,7 @@ from kerykeion_mcp.server import (
     generate_synastry_chart,
     generate_transit_chart,
     generate_planetary_return,
+    get_current_positions,
 )
 
 
@@ -149,3 +150,31 @@ def test_solar_return_with_relocation_differs_from_birth_location(birth_rome):
     assert birth_location["status"] == "success"
     assert relocated["status"] == "success"
     assert birth_location["text"] != relocated["text"]
+
+
+def test_current_positions_accept_house_and_zodiac_params(birth_rome):
+    # K3: parity with the other subject-creating tools.
+    tropical = get_current_positions(
+        lat=birth_rome["lat"], lng=birth_rome["lng"], tz_str=birth_rome["tz_str"],
+        house_system="W",
+    )
+    sidereal = get_current_positions(
+        lat=birth_rome["lat"], lng=birth_rome["lng"], tz_str=birth_rome["tz_str"],
+        house_system="W", zodiac_type="Sidereal", sidereal_mode="LAHIRI",
+    )
+    assert tropical["status"] == "success"
+    assert sidereal["status"] == "success"
+    assert tropical["applied_settings"]["house_system"] == "W (Whole Sign)"
+    assert "House system: equal/ whole sign" in tropical["text"]
+    assert sidereal["applied_settings"]["sidereal_mode"] == "LAHIRI"
+    # Ayanamsha shifts every longitude ~24 degrees, so the position text differs.
+    assert tropical["text"] != sidereal["text"]
+
+
+def test_current_positions_sidereal_without_mode_rejected(birth_rome):
+    result = get_current_positions(
+        lat=birth_rome["lat"], lng=birth_rome["lng"], tz_str=birth_rome["tz_str"],
+        zodiac_type="Sidereal",
+    )
+    assert result["status"] == "error"
+    assert "sidereal_mode" in result["error"]

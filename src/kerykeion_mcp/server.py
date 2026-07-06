@@ -1073,6 +1073,9 @@ def get_current_positions(
     city: str = "",
     nation: str = "",
     language: str = "EN",
+    house_system: str = "P",
+    zodiac_type: str = "Tropical",
+    sidereal_mode: Optional[str] = None,
 ) -> dict:
     """
     Get current planetary positions for a specific location.
@@ -1086,6 +1089,9 @@ def get_current_positions(
         tz_str: IANA timezone (e.g., "America/New_York")
         city, nation: Location city/nation (optional, chart labeling only)
         language: Output language (default: EN)
+        house_system: House system identifier
+        zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
+        sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
 
     Returns:
         Dictionary with current planetary positions as text
@@ -1095,6 +1101,9 @@ def get_current_positions(
     validate_coordinates(lat, lng)
     validate_timezone(tz_str)
     language = validate_language(language)
+    house_system = validate_house_system(house_system)
+    zodiac_type = validate_zodiac_type(zodiac_type)
+    sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
     city, nation = resolve_location(city, nation, lat, lng)
 
     # Create subject for current time
@@ -1102,6 +1111,9 @@ def get_current_positions(
         name="Current Positions",
         lat=lat, lng=lng, tz_str=tz_str,
         city=city, nation=nation,
+        houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
         online=False,
     )
 
@@ -1109,7 +1121,9 @@ def get_current_positions(
         "status": "success",
         "chart_type": "Current Positions",
         "timestamp": str(now.utc_time) if hasattr(now, 'utc_time') else "current",
-        "applied_settings": build_applied_settings("P", language=language),
+        "applied_settings": build_applied_settings(
+            house_system, zodiac_type, sidereal_mode, language=language
+        ),
         "text": to_context(now),
     }
     
