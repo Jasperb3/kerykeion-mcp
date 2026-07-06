@@ -115,6 +115,27 @@ def test_relocated_lunar_return_carries_return_location_label(birth_rome):
     assert "51.51N" not in birth_location["text"]
 
 
+def test_sidereal_return_rejected_with_educational_error(birth_rome):
+    # K2: kerykeion's return search matches the natal *sidereal* longitude
+    # against transiting *tropical* longitudes (probe: ~25-day error), so
+    # sidereal returns are explicitly rejected rather than silently wrong.
+    result = generate_planetary_return(
+        **birth_rome, return_type="Solar", return_year=2020,
+        zodiac_type="Sidereal", sidereal_mode="LAHIRI", output_format="text",
+    )
+    assert result["status"] == "error"
+    assert "not yet supported" in result["error"]
+    assert result["hint"]
+
+
+def test_return_applied_settings_include_zodiac_fields(birth_rome):
+    result = generate_planetary_return(
+        **birth_rome, return_type="Solar", return_year=2020, output_format="text",
+    )
+    assert result["applied_settings"]["zodiac_type"] == "Tropical"
+    assert result["applied_settings"]["sidereal_mode"] is None
+
+
 def test_solar_return_with_relocation_differs_from_birth_location(birth_rome):
     birth_location = generate_planetary_return(
         **birth_rome, return_type="Solar", return_year=2020, output_format="text"

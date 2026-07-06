@@ -769,6 +769,8 @@ def generate_planetary_return(
     theme: str = "classic",
     language: str = "EN",
     house_system: str = "P",
+    zodiac_type: str = "Tropical",
+    sidereal_mode: Optional[str] = None,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
     chart_style: ChartStyle = "full",
@@ -805,6 +807,9 @@ def generate_planetary_return(
         theme: Chart theme
         language: Chart language (default: EN)
         house_system: House system identifier
+        zodiac_type: "Tropical" only. Sidereal return charts are rejected with an
+            explanatory error -- the underlying return search is not sidereal-aware.
+        sidereal_mode: Not supported for returns (see zodiac_type)
         output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         chart_style: "full", "wheel_only", or "aspect_grid"
@@ -817,6 +822,21 @@ def generate_planetary_return(
             f"Invalid return_type '{return_type}'.",
             hint="Valid return types are: Solar, Lunar",
         )
+    zodiac_type = validate_zodiac_type(zodiac_type)
+    if zodiac_type == "Sidereal":
+        # kerykeion's return search compares the natal subject's stored
+        # (sidereal) longitude against transiting *tropical* longitudes, so a
+        # sidereal return lands ~an ayanamsha of solar motion off (verified
+        # by probe: 2030 LAHIRI solar return found 25 days early). Reject
+        # rather than ship a silently wrong chart.
+        raise ChartInputError(
+            "Sidereal return charts are not yet supported by the underlying search.",
+            hint=(
+                "Generate the return tropically, or use a sidereal transit "
+                "chart at the known return moment."
+            ),
+        )
+    sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
 
     logger.info(f"Generating {return_type} return")
     logger.debug(f"Subject: {name}")
@@ -871,6 +891,8 @@ def generate_planetary_return(
         lat=lat, lng=lng, tz_str=tz_str,
         city=city, nation=nation,
         houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
         online=False,
     )
 
@@ -900,6 +922,8 @@ def generate_planetary_return(
         lat=search_lat, lng=search_lng, tz_str=search_tz_str,
         city=return_city_label, nation=return_nation_label,
         houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
         online=False,
     )
     return_data = ChartDataFactory.create_natal_chart_data(return_subject)
@@ -911,7 +935,7 @@ def generate_planetary_return(
         "return_year": return_year,
         "return_date": return_model.iso_formatted_local_datetime if hasattr(return_model, 'iso_formatted_local_datetime') else None,
         "applied_settings": build_applied_settings(
-            house_system, theme=theme, language=language, chart_style=chart_style
+            house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
         "text": to_context(return_data),
     }
