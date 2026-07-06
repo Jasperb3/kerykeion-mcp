@@ -95,6 +95,9 @@ def test_return_date_unchanged_by_subject_rebuild(birth_rome):
     )
     assert result["status"] == "success"
     assert result["return_date"] == "2020-06-14T20:41:15+02:00"
+    # The rebuilt chart must still be cast at the moment of exactitude: the
+    # return chart's Sun sits at the natal Sun longitude (84.15 degrees).
+    assert "Sun at 24.15° in Gemini" in result["text"]
 
 
 def test_relocated_lunar_return_carries_return_location_label(birth_rome):
