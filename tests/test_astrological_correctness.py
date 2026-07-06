@@ -11,6 +11,7 @@ from kerykeion_mcp.server import (
     generate_synastry_chart,
     generate_transit_chart,
     generate_planetary_return,
+    get_current_positions,
 )
 
 
@@ -74,6 +75,71 @@ def test_lunar_return_without_explicit_date_returns_near_today(birth_rome):
     assert return_date - datetime.now() < timedelta(days=28)
 
 
+def test_return_chart_honors_whole_sign_house_system(birth_rome):
+    # K1: the factory-built return subject always came back Placidus; the
+    # rebuilt subject must actually be Whole Sign, not just claim it.
+    result = generate_planetary_return(
+        **birth_rome, return_type="Solar", return_year=2020,
+        house_system="W", output_format="text",
+    )
+    assert result["status"] == "success"
+    assert result["applied_settings"]["house_system"] == "W (Whole Sign)"
+    assert "House system: equal/ whole sign" in result["text"]
+
+
+def test_return_date_unchanged_by_subject_rebuild(birth_rome):
+    # K1 regression pin: rebuilding the return subject must not shift the
+    # moment of exactitude found by the factory (pre-fix golden value).
+    result = generate_planetary_return(
+        **birth_rome, return_type="Solar", return_year=2020, output_format="text",
+    )
+    assert result["status"] == "success"
+    assert result["return_date"] == "2020-06-14T20:41:15+02:00"
+    # The rebuilt chart must still be cast at the moment of exactitude: the
+    # return chart's Sun sits at the natal Sun longitude (84.15 degrees).
+    assert "Sun at 24.15° in Gemini" in result["text"]
+
+
+def test_relocated_lunar_return_carries_return_location_label(birth_rome):
+    # K1: a relocated return must be labeled with the return location, not the
+    # birth city, and its house cusps must differ from the birth-location cast.
+    common = dict(
+        **birth_rome, city="Rome", nation="IT", return_type="Lunar",
+        return_year=2026, return_month=7, return_day=1, output_format="text",
+    )
+    birth_location = generate_planetary_return(**common)
+    relocated = generate_planetary_return(
+        **common,
+        return_lat=51.5074, return_lng=-0.1278, return_tz_str="Europe/London",
+    )
+    assert birth_location["status"] == "success"
+    assert relocated["status"] == "success"
+    assert relocated["text"] != birth_location["text"]
+    assert "51.51N, 0.13W" in relocated["text"]
+    assert "51.51N" not in birth_location["text"]
+
+
+def test_sidereal_return_rejected_with_educational_error(birth_rome):
+    # K2: kerykeion's return search matches the natal *sidereal* longitude
+    # against transiting *tropical* longitudes (probe: ~25-day error), so
+    # sidereal returns are explicitly rejected rather than silently wrong.
+    result = generate_planetary_return(
+        **birth_rome, return_type="Solar", return_year=2020,
+        zodiac_type="Sidereal", sidereal_mode="LAHIRI", output_format="text",
+    )
+    assert result["status"] == "error"
+    assert "not yet supported" in result["error"]
+    assert result["hint"]
+
+
+def test_return_applied_settings_include_zodiac_fields(birth_rome):
+    result = generate_planetary_return(
+        **birth_rome, return_type="Solar", return_year=2020, output_format="text",
+    )
+    assert result["applied_settings"]["zodiac_type"] == "Tropical"
+    assert result["applied_settings"]["sidereal_mode"] is None
+
+
 def test_solar_return_with_relocation_differs_from_birth_location(birth_rome):
     birth_location = generate_planetary_return(
         **birth_rome, return_type="Solar", return_year=2020, output_format="text"
@@ -87,3 +153,31 @@ def test_solar_return_with_relocation_differs_from_birth_location(birth_rome):
     assert birth_location["status"] == "success"
     assert relocated["status"] == "success"
     assert birth_location["text"] != relocated["text"]
+
+
+def test_current_positions_accept_house_and_zodiac_params(birth_rome):
+    # K3: parity with the other subject-creating tools.
+    tropical = get_current_positions(
+        lat=birth_rome["lat"], lng=birth_rome["lng"], tz_str=birth_rome["tz_str"],
+        house_system="W",
+    )
+    sidereal = get_current_positions(
+        lat=birth_rome["lat"], lng=birth_rome["lng"], tz_str=birth_rome["tz_str"],
+        house_system="W", zodiac_type="Sidereal", sidereal_mode="LAHIRI",
+    )
+    assert tropical["status"] == "success"
+    assert sidereal["status"] == "success"
+    assert tropical["applied_settings"]["house_system"] == "W (Whole Sign)"
+    assert "House system: equal/ whole sign" in tropical["text"]
+    assert sidereal["applied_settings"]["sidereal_mode"] == "LAHIRI"
+    # Ayanamsha shifts every longitude ~24 degrees, so the position text differs.
+    assert tropical["text"] != sidereal["text"]
+
+
+def test_current_positions_sidereal_without_mode_rejected(birth_rome):
+    result = get_current_positions(
+        lat=birth_rome["lat"], lng=birth_rome["lng"], tz_str=birth_rome["tz_str"],
+        zodiac_type="Sidereal",
+    )
+    assert result["status"] == "error"
+    assert "sidereal_mode" in result["error"]

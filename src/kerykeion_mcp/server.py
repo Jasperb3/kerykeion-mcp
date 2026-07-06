@@ -28,6 +28,12 @@ from .chart_utils import (
     generate_and_save_images,
     HAS_CAIROSVG,
 )
+from .patterns import (
+    PATTERN_PLANETS,
+    detect_patterns,
+    element_balance,
+    mode_balance,
+)
 from .validation import (
     ChartInputError,
     validate_theme,
@@ -448,7 +454,19 @@ def generate_synastry_chart(
     
     # Add relationship score if available
     if include_relationship_score and synastry_data.relationship_score:
-        result["relationship_score"] = synastry_data.relationship_score.score_value
+        score = synastry_data.relationship_score
+        result["relationship_score"] = {
+            "value": score.score_value,
+            "description": score.score_description,
+            # Sun signs in the same quadruplicity, per Discepolo
+            "is_destiny_sign": score.is_destiny_sign,
+            "breakdown": [item.model_dump() for item in score.score_breakdown],
+            "scale": "0-44+ (Discepolo method)",
+            "note": (
+                "Counts specific aspect contacts per Ciro Discepolo's method; "
+                "one lens among many, not a verdict on relationship viability."
+            ),
+        }
     
     # Generate and save images if requested
     if output_format in ("images", "all"):
@@ -765,9 +783,12 @@ def generate_planetary_return(
     return_lat: Optional[float] = None,
     return_lng: Optional[float] = None,
     return_tz_str: Optional[str] = None,
+    return_city: str = "", return_nation: str = "",
     theme: str = "classic",
     language: str = "EN",
     house_system: str = "P",
+    zodiac_type: str = "Tropical",
+    sidereal_mode: Optional[str] = None,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
     chart_style: ChartStyle = "full",
@@ -798,9 +819,15 @@ def generate_planetary_return(
             backward compatibility)
         return_lat, return_lng, return_tz_str: Location to cast the return chart for
             (defaults to birth location if omitted)
+        return_city, return_nation: Label for the return location (optional, chart
+            labeling only). If omitted, a relocated return is labeled with its
+            coordinates; a non-relocated return keeps the birth location label.
         theme: Chart theme
         language: Chart language (default: EN)
         house_system: House system identifier
+        zodiac_type: "Tropical" only. Sidereal return charts are rejected with an
+            explanatory error -- the underlying return search is not sidereal-aware.
+        sidereal_mode: Not supported for returns (see zodiac_type)
         output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         chart_style: "full", "wheel_only", or "aspect_grid"
@@ -813,6 +840,21 @@ def generate_planetary_return(
             f"Invalid return_type '{return_type}'.",
             hint="Valid return types are: Solar, Lunar",
         )
+    zodiac_type = validate_zodiac_type(zodiac_type)
+    if zodiac_type == "Sidereal":
+        # kerykeion's return search compares the natal subject's stored
+        # (sidereal) longitude against transiting *tropical* longitudes, so a
+        # sidereal return lands ~an ayanamsha of solar motion off (verified
+        # by probe: 2030 LAHIRI solar return found 25 days early). Reject
+        # rather than ship a silently wrong chart.
+        raise ChartInputError(
+            "Sidereal return charts are not yet supported by the underlying search.",
+            hint=(
+                "Generate the return tropically, or use a sidereal transit "
+                "chart at the known return moment."
+            ),
+        )
+    sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
 
     logger.info(f"Generating {return_type} return")
     logger.debug(f"Subject: {name}")
@@ -833,6 +875,16 @@ def generate_planetary_return(
         validate_coordinates(search_lat, search_lng, label="Return location")
     if return_tz_str is not None:
         validate_timezone(search_tz_str, label="Return timezone")
+
+    # Label the return chart with the *return* location: an explicit
+    # return_city wins; a relocated return without one gets a coordinate
+    # label; a non-relocated return keeps the birth label.
+    if not return_city and return_lat is None and return_lng is None:
+        return_city_label, return_nation_label = city, nation
+    else:
+        return_city_label, return_nation_label = resolve_location(
+            return_city, return_nation, search_lat, search_lng
+        )
 
     # Default to today's date (needed for lunar returns, which recur every
     # ~27.3 days -- searching from Jan 1 would return January's lunar return
@@ -857,6 +909,8 @@ def generate_planetary_return(
         lat=lat, lng=lng, tz_str=tz_str,
         city=city, nation=nation,
         houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
         online=False,
     )
 
@@ -875,10 +929,23 @@ def generate_planetary_return(
         day=return_day,
         return_type=return_type,
     )
-    
-    # PlanetReturnModel IS the subject itself (has all planetary positions)
-    return_data = ChartDataFactory.create_natal_chart_data(return_model)
-    
+
+    # The factory only locates the moment of exactitude -- the subject it
+    # builds ignores the requested house system (always Placidus). Rebuild
+    # the return subject at that moment with the settings actually requested,
+    # so applied_settings stays truthful by construction.
+    return_subject = AstrologicalSubjectFactory.from_iso_utc_time(
+        name=f"{name} {return_type} Return",
+        iso_utc_time=return_model.iso_formatted_utc_datetime,
+        lat=search_lat, lng=search_lng, tz_str=search_tz_str,
+        city=return_city_label, nation=return_nation_label,
+        houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
+        online=False,
+    )
+    return_data = ChartDataFactory.create_natal_chart_data(return_subject)
+
     result = {
         "status": "success",
         "chart_type": f"{return_type} Return",
@@ -886,7 +953,7 @@ def generate_planetary_return(
         "return_year": return_year,
         "return_date": return_model.iso_formatted_local_datetime if hasattr(return_model, 'iso_formatted_local_datetime') else None,
         "applied_settings": build_applied_settings(
-            house_system, theme=theme, language=language, chart_style=chart_style
+            house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
         "text": to_context(return_data),
     }
@@ -1024,6 +1091,9 @@ def get_current_positions(
     city: str = "",
     nation: str = "",
     language: str = "EN",
+    house_system: str = "P",
+    zodiac_type: str = "Tropical",
+    sidereal_mode: Optional[str] = None,
 ) -> dict:
     """
     Get current planetary positions for a specific location.
@@ -1037,6 +1107,9 @@ def get_current_positions(
         tz_str: IANA timezone (e.g., "America/New_York")
         city, nation: Location city/nation (optional, chart labeling only)
         language: Output language (default: EN)
+        house_system: House system identifier
+        zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
+        sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
 
     Returns:
         Dictionary with current planetary positions as text
@@ -1046,6 +1119,9 @@ def get_current_positions(
     validate_coordinates(lat, lng)
     validate_timezone(tz_str)
     language = validate_language(language)
+    house_system = validate_house_system(house_system)
+    zodiac_type = validate_zodiac_type(zodiac_type)
+    sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
     city, nation = resolve_location(city, nation, lat, lng)
 
     # Create subject for current time
@@ -1053,6 +1129,9 @@ def get_current_positions(
         name="Current Positions",
         lat=lat, lng=lng, tz_str=tz_str,
         city=city, nation=nation,
+        houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
         online=False,
     )
 
@@ -1060,7 +1139,9 @@ def get_current_positions(
         "status": "success",
         "chart_type": "Current Positions",
         "timestamp": str(now.utc_time) if hasattr(now, 'utc_time') else "current",
-        "applied_settings": build_applied_settings("P", language=language),
+        "applied_settings": build_applied_settings(
+            house_system, zodiac_type, sidereal_mode, language=language
+        ),
         "text": to_context(now),
     }
     
@@ -1256,6 +1337,100 @@ def get_synastry_aspects(
     }
     
     logger.info(f"Found {len(aspects_list)} synastry aspects")
+    return result
+
+
+@mcp.tool()
+@handle_chart_errors
+def get_chart_patterns(
+    name: str,
+    year: int,
+    month: int,
+    day: int,
+    hour: int,
+    minute: int,
+    lat: float,
+    lng: float,
+    tz_str: str,
+    house_system: str = "P",
+    zodiac_type: str = "Tropical",
+    sidereal_mode: Optional[str] = None,
+) -> dict:
+    """
+    Detect chart patterns (stelliums, T-squares, grand trines, grand crosses,
+    yods, kites) and element/mode balance for a single chart, without images.
+
+    Detection runs over the ten classical-to-modern planets (Sun through
+    Pluto) using the aspects kerykeion found with its own orb policy, except
+    quincunxes (for yods), which are computed from longitudes with a 3-degree
+    orb because kerykeion's single-chart aspect set omits them. Each pattern
+    carries a neutral, growth-oriented one-line note.
+
+    Args:
+        name: Name of the chart subject
+        year, month, day: Birth date
+        hour, minute: Birth time
+        lat, lng: Birth coordinates
+        tz_str: IANA timezone
+        house_system: House system identifier
+        zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
+        sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
+
+    Returns:
+        dict: Contains:
+        - patterns: List of detected patterns with type, planets, and note
+        - element_balance / mode_balance: counts with missing categories flagged
+    """
+    logger.info("Detecting chart patterns")
+    logger.debug(f"Subject: {name}")
+
+    validate_coordinates(lat, lng)
+    validate_datetime_fields(year, month, day, hour, minute)
+    validate_timezone(tz_str)
+    house_system = validate_house_system(house_system)
+    zodiac_type = validate_zodiac_type(zodiac_type)
+    sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
+
+    subject = AstrologicalSubjectFactory.from_birth_data(
+        name=name,
+        year=year, month=month, day=day,
+        hour=hour, minute=minute,
+        lat=lat, lng=lng, tz_str=tz_str,
+        houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
+        online=False,
+    )
+
+    aspect_result = AspectsFactory.single_chart_aspects(subject)
+    aspects = [
+        {"p1": a.p1_name, "p2": a.p2_name, "type": a.aspect}
+        for a in aspect_result.aspects
+    ]
+    planets = {}
+    for planet_name in PATTERN_PLANETS:
+        point = getattr(subject, planet_name.lower())
+        planets[planet_name] = {
+            "sign": point.sign,
+            "element": point.element,
+            "mode": point.quality,
+            "abs_pos": point.abs_pos,
+        }
+
+    patterns = detect_patterns(planets, aspects)
+
+    result = {
+        "status": "success",
+        "chart_type": "Chart Patterns",
+        "subject_name": name,
+        "applied_settings": build_applied_settings(house_system, zodiac_type, sidereal_mode),
+        "pattern_count": len(patterns),
+        "patterns": patterns,
+        "element_balance": element_balance(planets),
+        "mode_balance": mode_balance(planets),
+    }
+
+    logger.info(f"Found {len(patterns)} patterns")
     return result
 
 
