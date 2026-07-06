@@ -136,6 +136,7 @@ uv run mcp install src/kerykeion_mcp/server.py --name "Kerykeion Charts"
 | `get_current_positions` | Current planetary positions (text only) |
 | `get_aspects` | Get natal chart aspects without images |
 | `get_synastry_aspects` | Get inter-chart aspects for compatibility |
+| `get_chart_patterns` | Detect stelliums, T-squares, grand trines/crosses, yods, kites, and element/mode balance |
 
 ### Common Parameters
 
@@ -151,7 +152,9 @@ Most chart tools accept:
 - **output_dir**: Custom directory to save chart images (optional; must resolve under `~/.kerykeion_charts` or `KERYKEION_OUTPUT_BASE`)
 - **chart_style**: "full" (default), "wheel_only", or "aspect_grid"
 
-`generate_planetary_return` additionally accepts `return_month`/`return_day` (defaults to today, so lunar returns aren't stuck searching from January) and `return_lat`/`return_lng`/`return_tz_str` to cast the return chart for the person's current location instead of their birth location.
+`generate_planetary_return` additionally accepts `return_month`/`return_day` (defaults to today, so lunar returns aren't stuck searching from January), `return_lat`/`return_lng`/`return_tz_str` to cast the return chart for the person's current location instead of their birth location, and `return_city`/`return_nation` to label that location (relocated returns default to a coordinate label). Sidereal return charts are rejected with an explanatory error — see Roadmap.
+
+`generate_synastry_chart` returns `relationship_score` as an object (`value`, `description`, `is_destiny_sign`, `breakdown`, `scale`, `note`) using Ciro Discepolo's method — one lens among many, not a verdict on relationship viability.
 
 ### Response Format
 
@@ -223,6 +226,14 @@ The server includes pre-defined prompts to guide conversations:
 - **natal_chart_prompt** - Template for creating natal charts
 - **synastry_prompt** - Template for relationship compatibility
 - **transit_prompt** - Template for transit analysis
+
+## Roadmap
+
+- **Unknown-birth-time support** — noon default with suppressed angles/houses, so house-dependent claims are never presented for an unknown time.
+- **Annual profections tool** — time-lord technique that pairs naturally with the existing return charts.
+- **Solar-arc directions** — a widely used predictive technique not covered by transits or returns.
+- **Sidereal return charts** — blocked upstream: kerykeion's return search matches the natal sidereal longitude against transiting *tropical* longitudes (verified by probe, ~25 days off for LAHIRI), so the server rejects sidereal returns rather than shipping silently wrong charts.
+- **Transit-aspect list tool** — deliberately deferred; the Immanuel MCP's `transit_to_natal` tools already cover fast transit aspect analysis in this stack.
 
 ## License
 
