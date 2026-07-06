@@ -28,6 +28,12 @@ from .chart_utils import (
     generate_and_save_images,
     HAS_CAIROSVG,
 )
+from .patterns import (
+    PATTERN_PLANETS,
+    detect_patterns,
+    element_balance,
+    mode_balance,
+)
 from .validation import (
     ChartInputError,
     validate_theme,
@@ -1331,6 +1337,100 @@ def get_synastry_aspects(
     }
     
     logger.info(f"Found {len(aspects_list)} synastry aspects")
+    return result
+
+
+@mcp.tool()
+@handle_chart_errors
+def get_chart_patterns(
+    name: str,
+    year: int,
+    month: int,
+    day: int,
+    hour: int,
+    minute: int,
+    lat: float,
+    lng: float,
+    tz_str: str,
+    house_system: str = "P",
+    zodiac_type: str = "Tropical",
+    sidereal_mode: Optional[str] = None,
+) -> dict:
+    """
+    Detect chart patterns (stelliums, T-squares, grand trines, grand crosses,
+    yods, kites) and element/mode balance for a single chart, without images.
+
+    Detection runs over the ten classical-to-modern planets (Sun through
+    Pluto) using the aspects kerykeion found with its own orb policy, except
+    quincunxes (for yods), which are computed from longitudes with a 3-degree
+    orb because kerykeion's single-chart aspect set omits them. Each pattern
+    carries a neutral, growth-oriented one-line note.
+
+    Args:
+        name: Name of the chart subject
+        year, month, day: Birth date
+        hour, minute: Birth time
+        lat, lng: Birth coordinates
+        tz_str: IANA timezone
+        house_system: House system identifier
+        zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
+        sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
+
+    Returns:
+        dict: Contains:
+        - patterns: List of detected patterns with type, planets, and note
+        - element_balance / mode_balance: counts with missing categories flagged
+    """
+    logger.info("Detecting chart patterns")
+    logger.debug(f"Subject: {name}")
+
+    validate_coordinates(lat, lng)
+    validate_datetime_fields(year, month, day, hour, minute)
+    validate_timezone(tz_str)
+    house_system = validate_house_system(house_system)
+    zodiac_type = validate_zodiac_type(zodiac_type)
+    sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
+
+    subject = AstrologicalSubjectFactory.from_birth_data(
+        name=name,
+        year=year, month=month, day=day,
+        hour=hour, minute=minute,
+        lat=lat, lng=lng, tz_str=tz_str,
+        houses_system_identifier=house_system,
+        zodiac_type=zodiac_type,
+        sidereal_mode=sidereal_mode,
+        online=False,
+    )
+
+    aspect_result = AspectsFactory.single_chart_aspects(subject)
+    aspects = [
+        {"p1": a.p1_name, "p2": a.p2_name, "type": a.aspect}
+        for a in aspect_result.aspects
+    ]
+    planets = {}
+    for planet_name in PATTERN_PLANETS:
+        point = getattr(subject, planet_name.lower())
+        planets[planet_name] = {
+            "sign": point.sign,
+            "element": point.element,
+            "mode": point.quality,
+            "abs_pos": point.abs_pos,
+        }
+
+    patterns = detect_patterns(planets, aspects)
+
+    result = {
+        "status": "success",
+        "chart_type": "Chart Patterns",
+        "subject_name": name,
+        "applied_settings": build_applied_settings(house_system, zodiac_type, sidereal_mode),
+        "pattern_count": len(patterns),
+        "patterns": patterns,
+        "element_balance": element_balance(planets),
+        "mode_balance": mode_balance(planets),
+    }
+
+    logger.info(f"Found {len(patterns)} patterns")
     return result
 
 

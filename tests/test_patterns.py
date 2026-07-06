@@ -262,3 +262,29 @@ def test_mode_balance_counts_and_missing():
     balance = mode_balance(planets)
     assert balance["counts"] == {"Cardinal": 1, "Fixed": 2, "Mutable": 0}
     assert balance["missing"] == ["Mutable"]
+
+
+# -------------------------------------------------------- tool integration
+
+def test_get_chart_patterns_tool_structure(birth_rome):
+    from kerykeion_mcp.server import get_chart_patterns
+
+    result = get_chart_patterns(**birth_rome)
+    assert result["status"] == "success"
+    assert result["chart_type"] == "Chart Patterns"
+    assert result["applied_settings"]["house_system"] == "P (Placidus)"
+    assert isinstance(result["patterns"], list)
+    for pattern in result["patterns"]:
+        assert pattern["type"]
+        assert pattern["planets"]
+        assert pattern["note"]
+    assert sum(result["element_balance"]["counts"].values()) == 10
+    assert sum(result["mode_balance"]["counts"].values()) == 10
+
+
+def test_get_chart_patterns_rejects_invalid_house_system(birth_rome):
+    from kerykeion_mcp.server import get_chart_patterns
+
+    result = get_chart_patterns(**birth_rome, house_system="Z")
+    assert result["status"] == "error"
+    assert "house_system" in result["error"]
