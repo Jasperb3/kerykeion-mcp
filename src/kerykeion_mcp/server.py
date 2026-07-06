@@ -448,7 +448,19 @@ def generate_synastry_chart(
     
     # Add relationship score if available
     if include_relationship_score and synastry_data.relationship_score:
-        result["relationship_score"] = synastry_data.relationship_score.score_value
+        score = synastry_data.relationship_score
+        result["relationship_score"] = {
+            "value": score.score_value,
+            "description": score.score_description,
+            # Sun signs in the same quadruplicity, per Discepolo
+            "is_destiny_sign": score.is_destiny_sign,
+            "breakdown": [item.model_dump() for item in score.score_breakdown],
+            "scale": "0-44+ (Discepolo method)",
+            "note": (
+                "Counts specific aspect contacts per Ciro Discepolo's method; "
+                "one lens among many, not a verdict on relationship viability."
+            ),
+        }
     
     # Generate and save images if requested
     if output_format in ("images", "all"):

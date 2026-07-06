@@ -57,6 +57,15 @@ def test_synastry_chart_contract(birth_rome, birth_london):
     assert result["subjects"] == [birth_rome["name"], birth_london["name"]]
     assert "text" in result
     assert "relationship_score" in result
+    # B1 (breaking change): score is a contextualized object, not a bare number.
+    score = result["relationship_score"]
+    assert score["value"] == 8  # golden value for the Rome/London fixtures
+    assert score["description"] == "Medium"
+    assert isinstance(score["is_destiny_sign"], bool)
+    assert isinstance(score["breakdown"], list)
+    assert all({"rule", "description", "points"} <= set(item) for item in score["breakdown"])
+    assert "Discepolo" in score["scale"]
+    assert "Discepolo" in score["note"]
 
 
 def test_transit_chart_contract(birth_rome):
