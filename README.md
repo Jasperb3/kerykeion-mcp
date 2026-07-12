@@ -12,6 +12,7 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 - **Event Charts** - Charts for specific moments (electional, horary)
 - **Current Positions** - Quick lookup of current planetary positions
 - **Aspects** - Structured natal and synastry aspect lists for AI analysis
+- **Chart Patterns** - Stelliums, T-squares, grand trines/crosses, yods, kites, and element/mode balance, each with a neutral, growth-oriented note
 
 ### Output Formats
 - **Text** - AI-readable descriptions optimized for LLM interpretation
@@ -34,6 +35,11 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 - The default HTTP bind is loopback-only (`127.0.0.1`); binding to all interfaces requires an explicit opt-in and logs a warning.
 
 ## Installation
+
+### Requirements
+
+- Python 3.10+
+- [Kerykeion](https://github.com/g-battaglia/kerykeion) 5.6+ (Swiss Ephemeris via `pyswisseph`), `pytz`, `cairosvg` -- all installed automatically below.
 
 ### Using uv (Recommended)
 
@@ -61,6 +67,21 @@ brew install cairo
 
 # Windows - See cairosvg documentation
 ```
+
+### Development
+
+```bash
+uv sync --extra dev
+uv run pytest -q
+```
+
+| Test file | Guards |
+|---|---|
+| `test_astrological_correctness.py` | Golden-value regression checks against the live Kerykeion/Swiss Ephemeris install (e.g. known Sun sign for a fixed birth) |
+| `test_contracts.py` | Response shape -- `status`, `applied_settings`, error format |
+| `test_patterns.py` | Pattern-detection logic in `patterns.py` (stelliums, T-squares, yods, etc.) against synthetic aspect fixtures |
+| `test_security.py` | Output-path confinement, PII-in-logs, loopback-only HTTP bind |
+| `test_validation.py` | Rejection behavior for invalid house systems, zodiac types, sidereal modes, chart styles |
 
 ## Usage
 
@@ -155,6 +176,18 @@ Most chart tools accept:
 `generate_planetary_return` additionally accepts `return_month`/`return_day` (defaults to today, so lunar returns aren't stuck searching from January), `return_lat`/`return_lng`/`return_tz_str` to cast the return chart for the person's current location instead of their birth location, and `return_city`/`return_nation` to label that location (relocated returns default to a coordinate label). Sidereal return charts are rejected with an explanatory error — see Roadmap.
 
 `generate_synastry_chart` returns `relationship_score` as an object (`value`, `description`, `is_destiny_sign`, `breakdown`, `scale`, `note`) using Ciro Discepolo's method — one lens among many, not a verdict on relationship viability.
+
+`get_chart_patterns` returns `patterns` (a list of `{type, planets, note}` -- plus `apex`/`trine_planets` for T-squares/kites), and `element_balance`/`mode_balance` as `{counts, missing}`, e.g.:
+
+```json
+{
+  "patterns": [
+    {"type": "grand_trine", "planets": ["Jupiter", "Moon", "Venus"], "note": "an easeful circuit of talent that rewards conscious activation rather than passive reliance"}
+  ],
+  "element_balance": {"counts": {"Fire": 2, "Earth": 3, "Air": 4, "Water": 1}, "missing": []},
+  "mode_balance": {"counts": {"Cardinal": 3, "Fixed": 4, "Mutable": 3}, "missing": []}
+}
+```
 
 ### Response Format
 
