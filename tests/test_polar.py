@@ -1,26 +1,26 @@
 """
 Polar-latitude behaviour.
 
-kerykeion 5.6 silently clamps every latitude beyond +/-66 deg to exactly
-+/-66 deg, which moves the Ascendant and every cusp (13 deg at Tromso). The
-server removes that clamp (kerykeion_mcp.polar) and, where the Swiss Ephemeris
-refuses Placidus or Koch inside a polar circle, falls back to Porphyry and
-says so -- matching the immanuel MCP server, so both engines' cusps agree.
+kerykeion 5.6 silently clamped every latitude beyond +/-66 deg to exactly
++/-66 deg, which moved the Ascendant and every cusp (13 deg at Tromso). From
+6.0 kerykeion keeps the true latitude and, where the Swiss Ephemeris refuses
+Placidus or Koch inside a polar circle, substitutes Porphyry and records it
+(polar_house_fallbacks). The server reports that fallback -- matching the
+immanuel MCP server, so both engines' cusps agree.
 
 Reference values for Tromso come from the immanuel server and are pinned
 here against the live Swiss Ephemeris.
 """
 
-import inspect
+import re
 
 import pytest
 import swisseph as swe
 
-import kerykeion.astrological_subject_factory as asf
-from kerykeion import AstrologicalSubjectFactory, utilities
+from kerykeion import AstrologicalSubjectFactory
 
-from kerykeion_mcp import polar
 from kerykeion_mcp.server import (
+    fell_back,
     generate_natal_chart,
     generate_event_chart,
     generate_synastry_chart,
@@ -67,8 +67,7 @@ def cusps(subject):
 
 
 def build(place, house_system="P", **kwargs):
-    return polar.build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    return AstrologicalSubjectFactory.from_birth_data(
         name="t", **place, houses_system_identifier=house_system, online=False, **kwargs,
     )
 
@@ -84,42 +83,29 @@ def pair(first, second):
     }
 
 
-# --- the clamp shim -----------------------------------------------------------
-
-def test_shim_is_installed_by_importing_the_server():
-    assert polar.installed()
-
+# --- the true latitude and kerykeion's fallback record ----------------------
 
 def test_subject_keeps_its_true_latitude():
     assert build(TROMSO, "W").lat == 69.65
     assert build(dict(TROMSO, lat=-77.85, lng=166.67, tz_str="Antarctica/McMurdo"), "W").lat == -77.85
 
 
-def test_kerykeion_still_clamps_without_the_shim():
-    # If this fails, kerykeion changed its clamp; re-check polar.py.
-    assert utilities.check_and_adjust_polar_latitude(69.65) == 66.0
-    assert utilities.check_and_adjust_polar_latitude(-69.65) == -66.0
-
-
-def test_kerykeion_still_calls_the_clamp_by_this_name():
-    # The shim replaces this module-level name; if kerykeion renames or moves
-    # the function, or stops calling it here, the shim silently does nothing.
-    assert hasattr(asf, "check_and_adjust_polar_latitude")
-    source = inspect.getsource(asf.LocationData.prepare_for_calculation)
-    assert "check_and_adjust_polar_latitude(self.lat)" in source
-
-
-def test_shim_refuses_an_unchecked_kerykeion_version(monkeypatch):
-    monkeypatch.setattr(polar.metadata, "version", lambda name: "5.7.0")
-    with pytest.raises(RuntimeError, match="5.7.0"):
-        polar.install()
+def test_kerykeion_records_the_polar_fallback():
+    # The server's reporting reads these; if kerykeion renames them, it breaks here.
+    subject = build(TROMSO)
+    assert subject.houses_system_identifier == "P"
+    assert subject.effective_houses_system_identifier == "O"
+    [record] = subject.polar_house_fallbacks
+    assert (record.requested_house_system_identifier, record.used_house_system_identifier) == ("P", "O")
+    assert record.used_latitude == 69.65
+    assert build(dict(TROMSO, lat=66.4)).polar_house_fallbacks == []
 
 
 # --- cusps against the Swiss Ephemeris and the immanuel reference ------------
 
 def test_tromso_matches_immanuel_reference_within_one_arcminute():
     subject = build(TROMSO)
-    assert subject.houses_system_identifier == "O"
+    assert subject.effective_houses_system_identifier == "O"
     assert arc(subject.ascendant.abs_pos, TROMSO_ASC) < ARCMIN
     assert arc(subject.medium_coeli.abs_pos, TROMSO_MC) < ARCMIN
     for got, want in zip(cusps(subject), TROMSO_CUSPS):
@@ -137,7 +123,7 @@ def test_tromso_matches_swiss_ephemeris_porphyry_to_the_arcsecond():
 
 @pytest.mark.parametrize("house_system", ["P", "K"])
 def test_just_outside_the_circle_is_real_quadrant_houses_at_the_true_latitude(house_system):
-    # 66.4 deg is beyond kerykeion's 66.0 clamp but outside the polar circle.
+    # 66.4 deg is beyond kerykeion 5.6's old 66.0 clamp but outside the polar circle.
     subject = build(dict(TROMSO, lat=66.4), house_system)
     assert subject.houses_system_identifier == house_system
     assert subject.lat == 66.4
@@ -161,30 +147,20 @@ def test_inside_the_circle_quadrant_houses_fall_back_to_porphyry(place, house_sy
     with pytest.raises(swe.Error, match="polar circle"):
         swe.houses_ex2(swe.julday(1988, 12, 21, 8.0), place["lat"], place["lng"], house_system.encode())
     subject = build(place, house_system)
-    assert subject.houses_system_identifier == "O"
-    assert polar.fell_back(subject, house_system)
+    assert subject.effective_houses_system_identifier == "O"
+    assert fell_back(subject, house_system)
     want, ascmc = swe_houses(subject, place["lat"], "O")
     for got, expected in zip(cusps(subject), want):
         assert arc(got, expected) < ARCSEC
     assert arc(subject.ascendant.abs_pos, ascmc[0]) < ARCSEC
 
 
-CAST_AS_ASKED = [
-    (place_id, house_system)
-    for place_id in POLAR_PLACES
-    for house_system in ["O", "R", "C", "A", "W", "M"]
-    # At this moment Longyearbyen's Regiomontanus/Campanus cusps run
-    # backwards; see test_reversed_cusps_are_an_educational_error.
-    if not (place_id == "Longyearbyen" and house_system in "RC")
-]
-
-
-@pytest.mark.parametrize("place_id, house_system", CAST_AS_ASKED)
-def test_non_quadrant_systems_are_cast_as_asked_at_the_true_latitude(place_id, house_system):
-    place = POLAR_PLACES[place_id]
+@pytest.mark.parametrize("house_system", ["O", "R", "C", "A", "W", "M"])
+@pytest.mark.parametrize("place", POLAR_PLACES.values(), ids=POLAR_PLACES.keys())
+def test_non_quadrant_systems_are_cast_as_asked_at_the_true_latitude(place, house_system):
     subject = build(place, house_system)
-    assert subject.houses_system_identifier == house_system
-    assert not polar.fell_back(subject, house_system)
+    assert subject.effective_houses_system_identifier == house_system
+    assert not fell_back(subject, house_system)
     want, ascmc = swe_houses(subject, place["lat"], house_system)
     for got, expected in zip(cusps(subject), want):
         assert arc(got, expected) < ARCSEC
@@ -192,31 +168,24 @@ def test_non_quadrant_systems_are_cast_as_asked_at_the_true_latitude(place_id, h
 
 
 @pytest.mark.parametrize("house_system", ["R", "C"])
-def test_reversed_cusps_are_an_educational_error(house_system):
+def test_reversed_cusps_are_cast(house_system):
+    # kerykeion 5.6 could not place planets in these backwards-running cusps
+    # (Longyearbyen, this moment); 6.x casts them, so the tool does too.
     place = POLAR_PLACES["Longyearbyen"]
     want, _ = swe.houses(swe.julday(1988, 12, 21, 8.0), place["lat"], place["lng"], house_system.encode())
-    # The Swiss Ephemeris casts them, but some consecutive cusps step backwards.
     assert any((want[(i + 1) % 12] - want[i]) % 360 > 180 for i in range(12))
     result = generate_natal_chart(name="t", **place, house_system=house_system, output_format="text")
-    assert result["status"] == "error"
-    assert "out of zodiacal order" in result["error"]
-    assert "Porphyry" in result["hint"] and "Whole Sign" in result["hint"]
+    assert result["status"] == "success", result
+    assert "warnings" not in result
 
 
 def test_sidereal_polar_chart_falls_back_too():
     subject = build(TROMSO, zodiac_type="Sidereal", sidereal_mode="LAHIRI")
-    assert subject.houses_system_identifier == "O"
+    assert subject.effective_houses_system_identifier == "O"
     swe.set_sid_mode(swe.SIDM_LAHIRI)
     want, _ = swe.houses_ex(subject.julian_day, 69.65, 18.95, b"O", swe.FLG_SIDEREAL)
     for got, expected in zip(cusps(subject), want):
         assert arc(got, expected) < ARCSEC
-
-
-def test_non_polar_swiss_ephemeris_errors_are_not_retried():
-    def broken(**kwargs):
-        raise swe.Error("some other failure")
-    with pytest.raises(swe.Error, match="some other failure"):
-        polar.build_subject(broken, houses_system_identifier="P")
 
 
 # --- reporting through the tools ----------------------------------------------
@@ -239,8 +208,9 @@ def test_natal_reports_the_fallback_everywhere():
     assert_fallback_reported(result)
     assert result["warnings"] == [PLACIDUS_WARNING]
     assert result["text"].startswith(f"Warning: {PLACIDUS_WARNING}\n\n")
-    assert "House system: Porphyry" in result["text"]
-    assert "absolute position 239.92" in result["text"]  # Ascendant
+    assert 'house_system="Porphyry"' in result["text"]
+    assert '<polar_house_fallback strategy="substitute_system" requested="Placidus" used="Porphyry"' in result["text"]
+    assert re.search(r'<point name="Ascendant" [^>]*abs_pos="239.92"', result["text"])
 
 
 def test_koch_fallback_names_koch():
@@ -316,7 +286,17 @@ def test_composite_with_one_polar_subject_casts_both_with_porphyry():
         "person1": PLACIDUS_FALLBACK, "person2": "O (Porphyry, to match person1)",
     }
     assert any("person2 was also cast with Porphyry" in w for w in result["warnings"])
-    assert "House system: Porphyry" in result["text"]
+    assert 'house_system="Porphyry"' in result["text"]
+
+
+
+def test_composite_with_two_polar_subjects():
+    result = generate_composite_chart(**pair(TROMSO, POLAR_PLACES["McMurdo"]), output_format="text")
+    assert_fallback_reported(result)
+    assert result["applied_settings"]["house_system_by_subject"] == {
+        "person1": PLACIDUS_FALLBACK, "person2": PLACIDUS_FALLBACK,
+    }
+    assert result["warnings"] == [PLACIDUS_WARNING]
 
 
 TRANSIT_TIME = dict(transit_year=2026, transit_month=11, transit_day=12, transit_hour=12, transit_minute=0)
@@ -362,12 +342,12 @@ def test_solar_return_relocated_into_the_circle():
         return_lat=69.65, return_lng=18.95, return_tz_str="Europe/Oslo", output_format="text",
     )
     assert_fallback_reported(result)
-    assert "House system: Porphyry" in result["text"]
+    assert 'house_system="Porphyry"' in result["text"]
 
 
 def test_return_moment_does_not_depend_on_the_search_latitude():
-    # The polar retry in generate_planetary_return searches from +/-66 deg;
-    # that is only sound while the return moment is independent of latitude.
+    # kerykeion 5.6 needed a polar retry here (it searched from +/-66 deg);
+    # kept as a guard that the return moment is independent of latitude.
     at = lambda lat: generate_planetary_return(
         name="t", **LONDON, **RETURN_DATE, return_lat=lat, return_lng=18.95,
         return_tz_str="Europe/Oslo", output_format="text",
@@ -377,9 +357,7 @@ def test_return_moment_does_not_depend_on_the_search_latitude():
 
 
 def test_return_moment_does_not_depend_on_the_search_location():
-    # generate_planetary_return also substitutes a placeholder for a 0.0
-    # coordinate (kerykeion treats it as missing); sound only while the
-    # moment is independent of where the search runs.
+    # The return moment must not depend on where the search runs.
     at = lambda lat, lng: generate_planetary_return(
         name="t", **LONDON, **RETURN_DATE, return_lat=lat, return_lng=lng,
         return_tz_str="Europe/London", output_format="text",

@@ -1,17 +1,18 @@
 [project]
 name = "kerykeion-mcp"
-version = "0.2.1"
+version = "0.3.0"
 description = "MCP server for astrological chart generation using Kerykeion"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Ben Jasper" }]
 keywords = ["mcp", "astrology", "kerykeion", "charts"]
 
 dependencies = [
     "mcp[cli]>=1.0.0",
-    # polar.install() refuses unchecked versions; widen with polar.SUPPORTED.
-    "kerykeion>=5.6.3,<5.7",
+    # engine.check() requires the Swiss Ephemeris backend (the [swiss] extra).
+    # Widen the pin only after re-running the polar and engine tests.
+    "kerykeion[swiss]>=6.0.5,<6.1",
     "pytz>=2024.1",
     "cairosvg>=2.7.0",
 ]

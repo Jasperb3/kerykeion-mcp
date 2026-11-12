@@ -23,7 +23,7 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 
 - **Zodiac**: Tropical by default. Sidereal is supported on every chart tool via `zodiac_type="Sidereal"`, but requires an explicit `sidereal_mode` (e.g. `"LAHIRI"`, the standard ayanamsha for Vedic/Jyotish work) -- the server will reject a sidereal request with no mode rather than silently picking one.
 - **House system**: Placidus (`"P"`) by default. Other systems (Whole Sign `"W"`, Koch `"K"`, Equal `"A"`, Campanus `"C"`, Regiomontanus `"R"`, Morinus `"M"`, Porphyry `"O"`) are available via `house_system`.
-- **Polar latitudes**: charts are cast at their true latitude. (kerykeion itself silently moves anything beyond ±66° to ±66°; the server undoes that.) Inside the polar circles (beyond about ±66.56°) Placidus and Koch houses don't exist, so the server uses Porphyry cusps, as the Swiss Ephemeris itself does, and **reports it**: `applied_settings.house_system` reads `"O (Porphyry, polar fallback from P Placidus)"`, a `warnings` list explains why, and the `text` starts with the same warning. Two-subject tools add `applied_settings.house_system_by_subject`. Porphyry, Equal, Whole Sign and Morinus always work there. Regiomontanus and Campanus usually do, but at some birth times far inside the circles their cusps run backwards and the server returns an error naming the systems that work. The Ascendant, MC, planets, planet-to-planet aspects and patterns don't depend on the house system.
+- **Polar latitudes**: charts are cast at their true latitude. Inside the polar circles (beyond about ±66.56°) Placidus and Koch houses don't exist, so kerykeion uses Porphyry cusps, as the Swiss Ephemeris itself does, and the server **reports it**: `applied_settings.house_system` reads `"O (Porphyry, polar fallback from P Placidus)"`, a `warnings` list explains why, and the `text` starts with the same warning. Two-subject tools add `applied_settings.house_system_by_subject`. Every other system (Porphyry, Regiomontanus, Campanus, Equal, Whole Sign, Morinus) is cast as asked. The Ascendant, MC, planets, planet-to-planet aspects and patterns don't depend on the house system.
 - **Interpretation text**: the `text` field in every response is Kerykeion's structured `to_context` output -- positions, aspects, and dignities. It is not a synthesized reading; synthesis happens in the consuming LLM, guided by the server's interpretation-framing instructions (developmental framing, no fatalistic/medical predictions, birth-time-confidence caveats for house-dependent claims).
 - **Relationship score**: `generate_synastry_chart`'s `relationship_score` uses Ciro Discepolo's method -- a count of specific aspect contacts, not a holistic verdict on relationship viability.
 - **Validation**: meaning-bearing parameters (house system, zodiac type, sidereal mode, chart style) are rejected with an educational error if invalid, never silently substituted. The one exception is the reported polar fallback above. Every successful response includes `applied_settings`, echoing exactly what was computed.
@@ -39,15 +39,19 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 
 ### Requirements
 
-- Python 3.10+
-- [Kerykeion](https://github.com/g-battaglia/kerykeion) 5.6+ (Swiss Ephemeris via `pyswisseph`), `pytz`, `cairosvg` -- all installed automatically below.
+- Python 3.12+
+- [Kerykeion](https://github.com/g-battaglia/kerykeion) 6.0.x with its Swiss Ephemeris backend (`kerykeion[swiss]`, i.e. `pyswisseph`), `pytz`, `cairosvg` -- all installed automatically below.
+- **The Swiss Ephemeris data files**, once per machine (see below). The server refuses to start without them rather than silently computing with the lower-precision Moshier ephemeris.
 
 ### Using uv (Recommended)
 
 ```bash
 cd kerykeion-mcp
 uv sync
+uv run python -m kerykeion.swisseph_setup   # one-time: downloads the .se1 files to ~/.kerykeion/sweph
 ```
+
+`swisseph_setup` asks you to accept the Swiss Ephemeris data licence (AGPL-3.0, Astrodienst AG) and downloads from github.com/aloistr/swisseph. On Windows the files go to `%USERPROFILE%\.kerykeion\sweph`; run it there too before starting Claude Desktop. If you already have the files elsewhere, set `KERYKEION_EPHE_PATH` to that directory instead (also in the Claude Desktop server `env`). The server sets `KERYKEION_BACKEND=swisseph` itself.
 
 ### Using pip
 
@@ -80,7 +84,8 @@ uv run pytest -q
 |---|---|
 | `test_astrological_correctness.py` | Golden-value regression checks against the live Kerykeion/Swiss Ephemeris install (e.g. known Sun sign for a fixed birth) |
 | `test_contracts.py` | Response shape -- `status`, `applied_settings`, error format |
-| `test_polar.py` | Polar latitudes: the kerykeion clamp is removed (and the shim breaks loudly if kerykeion changes), cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool |
+| `test_polar.py` | Polar latitudes: true latitude kept, cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool |
+| `test_engine.py` | The Swiss Ephemeris backend with its data files (not libephemeris, not Moshier); planets match the immanuel engine |
 | `test_patterns.py` | Pattern-detection logic in `patterns.py` (stelliums, T-squares, yods, etc.) against synthetic aspect fixtures |
 | `test_security.py` | Output-path confinement, PII-in-logs, loopback-only HTTP bind |
 | `test_validation.py` | Rejection behavior for invalid house systems, zodiac types, sidereal modes, chart styles; structured Swiss Ephemeris errors |

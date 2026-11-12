@@ -65,7 +65,7 @@ def test_transit_whole_sign_house_system_applied_to_both_subjects(birth_rome):
     assert result["applied_settings"]["house_system"] == "W (Whole Sign)"
     # Both the natal and transit subjects must report the requested house
     # system (F7: the transit subject used to always default to Placidus).
-    assert result["text"].count("House system: equal/ whole sign") == 2
+    assert result["text"].count('house_system="equal/ whole sign"') == 2
 
 
 def test_lunar_return_without_explicit_date_returns_near_today(birth_rome):
@@ -84,7 +84,7 @@ def test_return_chart_honors_whole_sign_house_system(birth_rome):
     )
     assert result["status"] == "success"
     assert result["applied_settings"]["house_system"] == "W (Whole Sign)"
-    assert "House system: equal/ whole sign" in result["text"]
+    assert 'house_system="equal/ whole sign"' in result["text"]
 
 
 def test_return_date_unchanged_by_subject_rebuild(birth_rome):
@@ -94,10 +94,13 @@ def test_return_date_unchanged_by_subject_rebuild(birth_rome):
         **birth_rome, return_type="Solar", return_year=2020, output_format="text",
     )
     assert result["status"] == "success"
-    assert result["return_date"] == "2020-06-14T20:41:15+02:00"
+    # 20:41:13, not the 20:41:15 pinned on kerykeion 5.6: that bundled no
+    # planet/Moon data files, so the Sun came from the Moshier ephemeris.
+    # swe.solcross_ut with the full Swiss Ephemeris files gives 18:41:13 UT.
+    assert result["return_date"] == "2020-06-14T20:41:13+02:00"
     # The rebuilt chart must still be cast at the moment of exactitude: the
     # return chart's Sun sits at the natal Sun longitude (84.15 degrees).
-    assert "Sun at 24.15° in Gemini" in result["text"]
+    assert '<point name="Sun" position="24.15" sign="Gemini"' in result["text"]
 
 
 def test_relocated_lunar_return_carries_return_location_label(birth_rome):
@@ -115,7 +118,7 @@ def test_relocated_lunar_return_carries_return_location_label(birth_rome):
     assert birth_location["status"] == "success"
     assert relocated["status"] == "success"
     assert relocated["text"] != birth_location["text"]
-    assert "51.51N, 0.13W" in relocated["text"]
+    assert 'city="51.51N" nation="0.13W"' in relocated["text"]
     assert "51.51N" not in birth_location["text"]
 
 
@@ -168,7 +171,7 @@ def test_current_positions_accept_house_and_zodiac_params(birth_rome):
     assert tropical["status"] == "success"
     assert sidereal["status"] == "success"
     assert tropical["applied_settings"]["house_system"] == "W (Whole Sign)"
-    assert "House system: equal/ whole sign" in tropical["text"]
+    assert 'house_system="equal/ whole sign"' in tropical["text"]
     assert sidereal["applied_settings"]["sidereal_mode"] == "LAHIRI"
     # Ayanamsha shifts every longitude ~24 degrees, so the position text differs.
     assert tropical["text"] != sidereal["text"]
