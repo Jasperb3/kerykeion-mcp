@@ -212,7 +212,7 @@ Most chart tools accept:
 - **lat/lng**: Coordinates (positive N/E, negative S/W)
 - **tz_str**: IANA timezone (e.g., "Europe/Rome", "America/New_York")
 - **city/nation**: Optional labels for the chart header (calculation always uses lat/lng; if omitted, a coordinate-derived label like `"41.90N, 12.50E"` is used instead of defaulting to Greenwich)
-- **theme**: "classic", "light", "dark", "strawberry", "dark-high-contrast"
+- **theme**: "classic" (default), "dark" or "black-and-white". Any other name gives "classic", and `applied_settings.theme` says so
 - **language**: "EN" (default), "IT", "FR", "ES", "PT", "CN", "RU", "TR", "DE", "HI"
 - **house_system**: "P" (Placidus), "W" (Whole Sign), "K" (Koch), "M" (Morinus), etc.
 - **zodiac_type** / **sidereal_mode**: "Tropical" (default) or "Sidereal" (requires `sidereal_mode`, e.g. "LAHIRI")

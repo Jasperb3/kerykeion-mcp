@@ -530,7 +530,7 @@ def generate_natal_chart(
         tz_str: IANA timezone (e.g., "Europe/Rome", "America/New_York")
         city: Birth city name (optional; used only for chart labeling, not calculation)
         nation: Birth country/nation code (optional; used only for chart labeling)
-        theme: Chart theme - "classic", "light", "dark", "strawberry", "dark-high-contrast"
+        theme: Chart theme - "classic", "dark" or "black-and-white" (any other name gives "classic")
         language: Chart language - "EN", "IT", "FR", "ES", "PT", "CN", "RU", "TR", "DE", "HI"
         house_system: House system - "P" (Placidus), "W" (Whole Sign), "K" (Koch), etc.
         zodiac_type: "Tropical" (Western) or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)

@@ -13,7 +13,8 @@ from typing import Optional
 
 import pytz
 
-VALID_THEMES = ["classic", "light", "dark", "strawberry", "dark-high-contrast"]
+# The themes kerykeion 6 ships. Any other name is coerced to "classic" (cosmetic).
+VALID_THEMES = ["classic", "dark", "black-and-white"]
 VALID_LANGUAGES = ["EN", "IT", "FR", "ES", "PT", "CN", "RU", "TR", "DE", "HI"]
 VALID_HOUSE_SYSTEMS = {
     "P": "Placidus",

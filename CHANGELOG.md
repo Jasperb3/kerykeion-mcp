@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Themes that kerykeion 6 doesn't have were listed as valid and then failed.** `theme="light"`, `"strawberry"` and `"dark-high-contrast"` passed the server's check and were refused by kerykeion with "Theme light is not available. Set None for default theme." The valid themes are now the three kerykeion 6 ships: `classic`, `dark` and `black-and-white`. Any other name is coerced to `classic`, as an unknown theme always was, and `applied_settings.theme` reports it. **Behaviour change:** a call with one of the three old names now returns a classic chart instead of an error.
+
 ## 0.3.2
 
 ### Changed
