@@ -246,7 +246,7 @@ _FILLED_CITY = re.compile(rf'(<(?:birth|transit)_data [^>]*?)city="(?:{_LAT}, {_
 _FILLED_NATION = re.compile(rf'(<(?:birth|transit)_data [^>]*?)nation="(?:{_LAT} {_LNG}|{_LNG})"')
 
 
-def context_text(chart) -> str:
+def context_text(chart, chart_type: Optional[str] = None, data_tag: Optional[str] = None) -> str:
     """
     kerykeion's to_context text for `chart`, with the structured place fields
     left as the caller gave them.
@@ -255,10 +255,20 @@ def context_text(chart) -> str:
     label never reads "Greenwich, GB"; in the text those fill-ins would sit in
     the city and nation fields ("78.22N", "15.63E"). They are emptied there --
     the element's lat/lng attributes already carry the coordinates.
+
+    `chart_type` names a single-wheel chart that kerykeion can only build as
+    natal chart data (returns, events): it replaces the type of the
+    <chart_analysis> element, and nothing else. `data_tag` renames the
+    <birth_data> element of a chart that has no birth (current positions).
     """
     text = to_context(chart)
     text = _FILLED_CITY.sub(r'\1city=""', text)
-    return _FILLED_NATION.sub(r'\1nation=""', text)
+    text = _FILLED_NATION.sub(r'\1nation=""', text)
+    if chart_type:
+        text = text.replace('<chart_analysis type="Natal">', f'<chart_analysis type="{chart_type}">', 1)
+    if data_tag:
+        text = text.replace("<birth_data ", f"<{data_tag} ", 1)
+    return text
 
 # Server instructions for AI assistants
 SERVER_INSTRUCTIONS = """
@@ -1150,7 +1160,7 @@ def generate_planetary_return(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": context_text(return_data),
+        "text": context_text(return_data, chart_type=f"{return_type} Return"),
     }
     report_polar_fallback(result, house_system, {"return": return_subject})
     
@@ -1256,7 +1266,7 @@ def generate_event_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": context_text(chart_data),
+        "text": context_text(chart_data, chart_type="Event"),
     }
     report_polar_fallback(result, house_system, {"event": event_subject})
     
@@ -1341,7 +1351,7 @@ def get_current_positions(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, language=language
         ),
-        "text": context_text(now),
+        "text": context_text(now, data_tag="moment"),
     }
     report_polar_fallback(result, house_system, {"now": now})
     

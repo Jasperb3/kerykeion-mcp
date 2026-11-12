@@ -289,3 +289,40 @@ def test_chart_text_keeps_the_5x_points(birth_rome):
     points = set(re.findall(r'<point name="([^"]+)"', text))
     assert {"Mean_Lilith", "True_South_Lunar_Node", "Descendant", "Imum_Coeli"} <= points
     assert len(points) == 18
+
+
+# --- chart labels in the text ------------------------------------------------
+
+def test_current_positions_text_calls_its_block_moment(birth_rome):
+    text = get_current_positions(lat=birth_rome["lat"], lng=birth_rome["lng"], tz_str=birth_rome["tz_str"])["text"]
+    assert re.search(r'<moment date="[^"]+" city="" nation="" lat="41.90"', text)
+    assert "<birth_data" not in text
+
+
+def test_return_and_event_text_carry_their_own_chart_type(birth_rome):
+    solar = generate_planetary_return(**birth_rome, return_type="Solar", return_year=2020, output_format="text")
+    lunar = generate_planetary_return(**birth_rome, return_type="Lunar", return_year=2020, output_format="text")
+    event = dict(birth_rome)
+    event = generate_event_chart(event_name=event.pop("name"), **event, output_format="text")
+    for result, chart_type in ((solar, "Solar Return"), (lunar, "Lunar Return"), (event, "Event")):
+        assert f'<chart_analysis type="{chart_type}">' in result["text"]
+        assert 'type="Natal"' not in result["text"]
+    natal = generate_natal_chart(**birth_rome, output_format="text")
+    assert '<chart_analysis type="Natal">' in natal["text"]
+
+
+def test_synastry_and_composite_text_is_kerykeions_own(birth_rome, birth_london):
+    from kerykeion import AstrologicalSubjectFactory, ChartDataFactory, CompositeSubjectFactory, to_context
+    from kerykeion_mcp.server import ACTIVE_POINTS, ASPECT_SETTINGS, context_text
+
+    def subject(birth, city, nation):
+        return AstrologicalSubjectFactory.from_birth_data(
+            **birth, city=city, nation=nation, online=False, active_points=ACTIVE_POINTS)
+
+    first, second = subject(birth_rome, "Rome", "IT"), subject(birth_london, "London", "GB")
+    synastry = ChartDataFactory.create_synastry_chart_data(first, second, **ASPECT_SETTINGS)
+    composite = ChartDataFactory.create_composite_chart_data(
+        CompositeSubjectFactory(first, second).get_midpoint_composite_subject_model(), **ASPECT_SETTINGS)
+    for data, chart_type in ((synastry, "Synastry"), (composite, "Composite")):
+        assert context_text(data) == to_context(data)
+        assert f'<chart_analysis type="{chart_type}">' in context_text(data)
