@@ -22,10 +22,11 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 ## Astrological Foundations
 
 - **Zodiac**: Tropical by default. Sidereal is supported on every chart tool via `zodiac_type="Sidereal"`, but requires an explicit `sidereal_mode` (e.g. `"LAHIRI"`, the standard ayanamsha for Vedic/Jyotish work) -- the server will reject a sidereal request with no mode rather than silently picking one.
-- **House system**: Placidus (`"P"`) by default. Other systems (Whole Sign `"W"`, Koch `"K"`, Equal `"A"`, Campanus `"C"`, Regiomontanus `"R"`, Morinus `"M"`, Porphyry `"O"`, Gauquelin Sectors `"G"`) are available via `house_system`.
+- **House system**: Placidus (`"P"`) by default. Other systems (Whole Sign `"W"`, Koch `"K"`, Equal `"A"`, Campanus `"C"`, Regiomontanus `"R"`, Morinus `"M"`, Porphyry `"O"`) are available via `house_system`.
+- **Polar latitudes**: charts are cast at their true latitude. (kerykeion itself silently moves anything beyond ±66° to ±66°; the server undoes that.) Inside the polar circles (beyond about ±66.56°) Placidus and Koch houses don't exist, so the server uses Porphyry cusps, as the Swiss Ephemeris itself does, and **reports it**: `applied_settings.house_system` reads `"O (Porphyry, polar fallback from P Placidus)"`, a `warnings` list explains why, and the `text` starts with the same warning. Two-subject tools add `applied_settings.house_system_by_subject`. Porphyry, Equal, Whole Sign and Morinus always work there. Regiomontanus and Campanus usually do, but at some birth times far inside the circles their cusps run backwards and the server returns an error naming the systems that work. The Ascendant, MC, planets, planet-to-planet aspects and patterns don't depend on the house system.
 - **Interpretation text**: the `text` field in every response is Kerykeion's structured `to_context` output -- positions, aspects, and dignities. It is not a synthesized reading; synthesis happens in the consuming LLM, guided by the server's interpretation-framing instructions (developmental framing, no fatalistic/medical predictions, birth-time-confidence caveats for house-dependent claims).
 - **Relationship score**: `generate_synastry_chart`'s `relationship_score` uses Ciro Discepolo's method -- a count of specific aspect contacts, not a holistic verdict on relationship viability.
-- **Validation**: meaning-bearing parameters (house system, zodiac type, sidereal mode, chart style) are rejected with an educational error if invalid, never silently substituted. Every successful response includes `applied_settings`, echoing exactly what was computed.
+- **Validation**: meaning-bearing parameters (house system, zodiac type, sidereal mode, chart style) are rejected with an educational error if invalid, never silently substituted. The one exception is the reported polar fallback above. Every successful response includes `applied_settings`, echoing exactly what was computed.
 
 ## Privacy
 
@@ -79,9 +80,10 @@ uv run pytest -q
 |---|---|
 | `test_astrological_correctness.py` | Golden-value regression checks against the live Kerykeion/Swiss Ephemeris install (e.g. known Sun sign for a fixed birth) |
 | `test_contracts.py` | Response shape -- `status`, `applied_settings`, error format |
+| `test_polar.py` | Polar latitudes: the kerykeion clamp is removed (and the shim breaks loudly if kerykeion changes), cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool |
 | `test_patterns.py` | Pattern-detection logic in `patterns.py` (stelliums, T-squares, yods, etc.) against synthetic aspect fixtures |
 | `test_security.py` | Output-path confinement, PII-in-logs, loopback-only HTTP bind |
-| `test_validation.py` | Rejection behavior for invalid house systems, zodiac types, sidereal modes, chart styles |
+| `test_validation.py` | Rejection behavior for invalid house systems, zodiac types, sidereal modes, chart styles; structured Swiss Ephemeris errors |
 
 ## Usage
 
@@ -210,6 +212,17 @@ Every tool returns `status` ("success" or "error") and, on success, `applied_set
   "svg_path": "/home/user/.kerykeion_charts/natal_test_20260106.svg",
   "png_path": "/home/user/.kerykeion_charts/natal_test_20260106.png",
   "output_dir": "/home/user/.kerykeion_charts"
+}
+```
+
+A chart inside a polar circle cast with Placidus or Koch also carries a `warnings` list (present only when it has entries):
+
+```json
+{
+  "status": "success",
+  "applied_settings": {"house_system": "O (Porphyry, polar fallback from P Placidus)", "...": "..."},
+  "warnings": ["A chart in this response lies inside a polar circle, where Placidus houses are undefined, so the Swiss Ephemeris used Porphyry cusps instead. The Ascendant and MC are unaffected. Pass house_system=\"W\" (or another non-polar system) to avoid the fallback."],
+  "text": "Warning: A chart in this response lies inside a polar circle, ..."
 }
 ```
 
