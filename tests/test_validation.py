@@ -7,9 +7,12 @@ educational {"status": "error", ...} response rather than silently
 substituted or left to raise a raw traceback.
 """
 
+import swisseph as swe
+
 from kerykeion_mcp.server import (
     generate_natal_chart,
     get_aspects,
+    handle_chart_errors,
 )
 
 
@@ -53,6 +56,14 @@ def test_invalid_house_system_rejected_listing_valid_codes(birth_rome):
     assert "Placidus" in result["hint"]
 
 
+def test_gauquelin_not_offered(birth_rome):
+    # kerykeion rejects "G" at every latitude, so it is not advertised.
+    result = generate_natal_chart(**birth_rome, house_system="G", output_format="text")
+    assert result["status"] == "error"
+    assert result["error"] == "Invalid house_system 'G'."
+    assert "Gauquelin" not in result["hint"]
+
+
 def test_invalid_chart_style_rejected(birth_rome):
     result = generate_natal_chart(**birth_rome, chart_style="bogus", output_format="text")
     assert result["status"] == "error"
@@ -76,3 +87,14 @@ def test_sidereal_with_lahiri_applies(birth_rome):
     result = get_aspects(**birth_rome, zodiac_type="Sidereal", sidereal_mode="LAHIRI")
     assert result["status"] == "success"
     assert result["applied_settings"]["sidereal_mode"] == "LAHIRI"
+
+
+def test_swiss_ephemeris_errors_become_structured_errors():
+    @handle_chart_errors
+    def tool():
+        raise swe.Error("swisseph.calc_ut: ephemeris file not found")
+    result = tool()
+    assert result["status"] == "error"
+    assert "ephemeris file not found" in result["error"]
+    assert "Internal error" not in result["error"]
+    assert result["hint"]

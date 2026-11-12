@@ -24,7 +24,6 @@ VALID_HOUSE_SYSTEMS = {
     "R": "Regiomontanus",
     "M": "Morinus",
     "O": "Porphyry",
-    "G": "Gauquelin (Sectors)",
 }
 VALID_ZODIAC_TYPES = ["Tropical", "Sidereal"]
 # Matches kerykeion.AstrologicalSubjectFactory.from_birth_data's sidereal_mode
