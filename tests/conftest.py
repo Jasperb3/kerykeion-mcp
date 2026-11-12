@@ -1,5 +1,8 @@
 """Shared fixtures for the Kerykeion MCP test suite."""
 
+# Before any test module imports kerykeion: this selects its ephemeris backend.
+import kerykeion_mcp  # noqa: F401
+
 import pytest
 
 BIRTH_ROME = dict(
