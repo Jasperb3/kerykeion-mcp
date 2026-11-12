@@ -8,6 +8,7 @@ ChatGPT Desktop via standard MCP transport.
 
 import functools
 import logging
+import re
 from datetime import datetime
 from typing import Optional, Literal
 
@@ -77,6 +78,44 @@ ASPECT_SETTINGS = dict(
 )
 
 
+ANGLES = ("ascendant", "descendant", "medium_coeli", "imum_coeli")
+# Below this an angle's speed is floating-point noise, not motion.
+ANGLE_SPEED_EPSILON = 1e-6
+
+
+def fix_axis_motion(subject):
+    """
+    Flag an angle retrograde when it moves backwards through the zodiac.
+
+    kerykeion takes the angles' speeds from the Swiss Ephemeris (houses_ex2)
+    but hard-codes them as direct. Outside the polar circles the angles always
+    move forwards; inside them the Ascendant (and so the Descendant) runs
+    backwards for part of the day, at the speed reported -- it matches a
+    finite difference of the Ascendant itself. The speed is kept as it is and
+    the flag made to agree with it.
+    """
+    for name in ANGLES:
+        angle = getattr(subject, name, None)
+        if angle is not None and angle.speed is not None:
+            angle.retrograde = angle.speed < -ANGLE_SPEED_EPSILON
+    return subject
+
+
+class SubjectFactory(AstrologicalSubjectFactory):
+    """AstrologicalSubjectFactory whose subjects' angles carry a truthful motion flag."""
+
+    @classmethod
+    def from_birth_data(cls, *args, **kwargs):
+        return fix_axis_motion(super().from_birth_data(*args, **kwargs))
+
+    @classmethod
+    def from_current_time(cls, *args, **kwargs):
+        return fix_axis_motion(super().from_current_time(*args, **kwargs))
+
+    @classmethod
+    def from_iso_utc_time(cls, *args, **kwargs):
+        return fix_axis_motion(super().from_iso_utc_time(*args, **kwargs))
+
 def handle_chart_errors(func):
     """
     Catch input/library errors and return a structured error response instead
@@ -89,7 +128,10 @@ def handle_chart_errors(func):
         try:
             return func(*args, **kwargs)
         except ChartInputError as e:
-            return {"status": "error", "error": e.message, "hint": e.hint}
+            response = {"status": "error", "error": e.message, "hint": e.hint}
+            if e.error_type:
+                response["type"] = e.error_type
+            return response
         except pytz.exceptions.UnknownTimeZoneError as e:
             return {"status": "error", "error": f"Unknown timezone: {e}", "hint": ""}
         except KerykeionException as e:
@@ -142,6 +184,23 @@ def build_applied_settings(
     return settings
 
 
+
+def composite_subject(person1, person2):
+    """
+    The midpoint composite of two subjects, its houses hung from the Ascendant.
+
+    Every composite cusp is a midpoint of the two cusps of its number; which of
+    the two midpoints (near or far) is decided by the angle held. kerykeion's
+    default ("auto") holds whichever angle pair sits closer, so for some pairs
+    it holds the Midheaven and the ring -- Ascendant included -- comes out half
+    a circle from the immanuel server's, which always holds the Ascendant
+    (cusp n = Asc midpoint + mean of each chart's (cusp n - Asc) mod 360).
+    Holding the Ascendant here makes the two engines agree.
+    """
+    return CompositeSubjectFactory(
+        person1, person2, house_anchor="ascendant"
+    ).get_midpoint_composite_subject_model()
+
 PORPHYRY = "O"
 
 
@@ -184,12 +243,26 @@ def report_polar_fallback(
         return
     settings = result["applied_settings"]
     settings["house_system"] = _house_system_label(house_system, True)
+    warnings = [POLAR_WARNING.format(name=VALID_HOUSE_SYSTEMS[house_system])]
     if len(subjects) > 1:
         by_subject = {label: _house_system_label(house_system, label in fallen) for label in subjects}
         if matched:
             by_subject[matched[0]] = f"{PORPHYRY} ({VALID_HOUSE_SYSTEMS[PORPHYRY]}, to match {matched[1]})"
         settings["house_system_by_subject"] = by_subject
-    warnings = [POLAR_WARNING.format(name=VALID_HOUSE_SYSTEMS[house_system])]
+        if len(set(by_subject.values())) > 1 and not matched:
+            # Synastry and transits keep each chart's own houses (each overlay
+            # reads the houses of the chart it lands in), so the two systems
+            # really differ. A composite has one set of houses and is
+            # `matched` instead.
+            settings["house_system"] = "mixed: " + "; ".join(
+                f"{label} {system}" for label, system in by_subject.items())
+            for label in fallen:
+                kept = "; ".join(f"{other}'s are {system}" for other, system in by_subject.items()
+                                 if other not in fallen)
+                warnings.append(
+                    f"{label}'s houses are {by_subject[label]}, while {kept}. Each chart keeps "
+                    "its own houses, so a house overlay uses the houses of the chart it lands in."
+                )
     if matched:
         warnings.append(
             f"A composite needs one house system for both people, so {matched[0]} "
@@ -218,6 +291,39 @@ def resolve_location(city: str, nation: str, lat: float, lng: float) -> tuple[st
     if nation:
         return f"{lat_label}, {lng_label}", nation
     return lat_label, lng_label
+
+
+_LAT = r"\d+\.\d{2}[NS]"
+_LNG = r"\d+\.\d{2}[EW]"
+# The coordinate fill-ins resolve_location makes: city "LAT, LNG" or "LAT",
+# nation "LAT LNG" or "LNG".
+_FILLED_CITY = re.compile(rf'(<(?:birth|transit)_data [^>]*?)city="(?:{_LAT}, {_LNG}|{_LAT})"')
+_FILLED_NATION = re.compile(rf'(<(?:birth|transit)_data [^>]*?)nation="(?:{_LAT} {_LNG}|{_LNG})"')
+
+
+def context_text(chart, chart_type: Optional[str] = None, data_tag: Optional[str] = None) -> str:
+    """
+    kerykeion's to_context text for `chart`, with the structured place fields
+    left as the caller gave them.
+
+    resolve_location fills a blank city/nation with coordinates so the wheel
+    label never reads "Greenwich, GB"; in the text those fill-ins would sit in
+    the city and nation fields ("78.22N", "15.63E"). They are emptied there --
+    the element's lat/lng attributes already carry the coordinates.
+
+    `chart_type` names a single-wheel chart that kerykeion can only build as
+    natal chart data (returns, events): it replaces the type of the
+    <chart_analysis> element, and nothing else. `data_tag` renames the
+    <birth_data> element of a chart that has no birth (current positions).
+    """
+    text = to_context(chart)
+    text = _FILLED_CITY.sub(r'\1city=""', text)
+    text = _FILLED_NATION.sub(r'\1nation=""', text)
+    if chart_type:
+        text = text.replace('<chart_analysis type="Natal">', f'<chart_analysis type="{chart_type}">', 1)
+    if data_tag:
+        text = text.replace("<birth_data ", f"<{data_tag} ", 1)
+    return text
 
 # Server instructions for AI assistants
 SERVER_INSTRUCTIONS = """
@@ -252,7 +358,12 @@ polar circles (beyond about 66.56 deg N/S) Placidus and Koch houses do not
 exist, so those charts use Porphyry cusps instead: applied_settings.house_system
 then reads e.g. "O (Porphyry, polar fallback from P Placidus)" and a warning
 says so. Tell the user which house system was actually used. Every other
-house system is cast as asked at the true latitude.
+house system is cast as asked at the true latitude. Synastry and transit
+charts keep each chart's own houses (an overlay uses the houses of the chart
+it lands in), so with one polar person house_system reads "mixed: ..." and
+names each person's system; a composite has one set of houses, so both
+people are cast with Porphyry. Exactly at a pole (latitude +/-90) there is
+no horizon: timed charts are refused with type "PoleError".
 
 Common timezones: UTC, Europe/London, Europe/Paris, Europe/Rome,
 America/New_York, America/Los_Angeles, Asia/Tokyo, Australia/Sydney
@@ -396,7 +507,7 @@ def generate_natal_chart(
     city, nation = resolve_location(city, nation, lat, lng)
 
     # Create astrological subject
-    subject = AstrologicalSubjectFactory.from_birth_data(
+    subject = SubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -421,7 +532,7 @@ def generate_natal_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(chart_data),
+        "text": context_text(chart_data),
     }
     report_polar_fallback(result, house_system, {"natal": subject})
 
@@ -472,6 +583,13 @@ def generate_synastry_chart(
     """
     Generate a synastry chart comparing two people for compatibility analysis.
 
+    Each person keeps their own houses, because each house overlay places one
+    person's planets in the other's houses. If one person was born inside a
+    polar circle (Placidus/Koch fall back to Porphyry there), the two charts'
+    house systems differ: applied_settings.house_system reads "mixed: ..." and
+    names each person's system. (A composite, with one set of houses, casts
+    both people with Porphyry instead.)
+
     Response contains 'svg_path'/'png_path' (local file paths) when
     output_format includes images -- read the SVG file directly to embed it.
 
@@ -520,7 +638,7 @@ def generate_synastry_chart(
     city2, nation2 = resolve_location(city2, nation2, lat2, lng2)
 
     # Create both subjects
-    person1 = AstrologicalSubjectFactory.from_birth_data(
+    person1 = SubjectFactory.from_birth_data(
         name=name1, year=year1, month=month1, day=day1,
         hour=hour1, minute=minute1,
         lat=lat1, lng=lng1, tz_str=tz_str1,
@@ -532,7 +650,7 @@ def generate_synastry_chart(
         active_points=ACTIVE_POINTS,
     )
 
-    person2 = AstrologicalSubjectFactory.from_birth_data(
+    person2 = SubjectFactory.from_birth_data(
         name=name2, year=year2, month=month2, day=day2,
         hour=hour2, minute=minute2,
         lat=lat2, lng=lng2, tz_str=tz_str2,
@@ -560,7 +678,7 @@ def generate_synastry_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(synastry_data),
+        "text": context_text(synastry_data),
     }
     report_polar_fallback(result, house_system, {"person1": person1, "person2": person2})
     
@@ -676,7 +794,7 @@ def generate_transit_chart(
     transit_city, transit_nation = resolve_location("", "", transit_lat, transit_lng)
 
     # Create natal subject
-    natal = AstrologicalSubjectFactory.from_birth_data(
+    natal = SubjectFactory.from_birth_data(
         name=natal_name,
         year=natal_year, month=natal_month, day=natal_day,
         hour=natal_hour, minute=natal_minute,
@@ -691,7 +809,7 @@ def generate_transit_chart(
 
     # Create transit subject - either current time or specified time
     if all(v is not None for v in [transit_year, transit_month, transit_day, transit_hour, transit_minute]):
-        transit = AstrologicalSubjectFactory.from_birth_data(
+        transit = SubjectFactory.from_birth_data(
             name="Transits",
             year=transit_year, month=transit_month, day=transit_day,
             hour=transit_hour, minute=transit_minute,
@@ -704,7 +822,7 @@ def generate_transit_chart(
             active_points=ACTIVE_POINTS,
         )
     else:
-        transit = AstrologicalSubjectFactory.from_current_time(
+        transit = SubjectFactory.from_current_time(
             name="Current Transits",
             lat=transit_lat, lng=transit_lng, tz_str=transit_tz_str,
             city=transit_city, nation=transit_nation,
@@ -726,11 +844,13 @@ def generate_transit_chart(
         "status": "success",
         "chart_type": "Transit",
         "natal_subject": natal_name,
-        "transit_time": str(transit.utc_time) if hasattr(transit, 'utc_time') else "current",
+        # The moment actually cast, in the transit zone (kerykeion 6 has no
+        # utc_time, so this used to read "current" even for explicit dates).
+        "transit_time": transit.iso_formatted_local_datetime,
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(transit_data),
+        "text": context_text(transit_data),
     }
     report_polar_fallback(result, house_system, {"natal": natal, "transit": transit})
     
@@ -840,7 +960,7 @@ def generate_composite_chart(
         online=False,
         active_points=ACTIVE_POINTS,
     )
-    person1 = AstrologicalSubjectFactory.from_birth_data(**person1_args)
+    person1 = SubjectFactory.from_birth_data(**person1_args)
 
     person2_args = dict(
         name=name2, year=year2, month=month2, day=day2,
@@ -853,7 +973,7 @@ def generate_composite_chart(
         online=False,
         active_points=ACTIVE_POINTS,
     )
-    person2 = AstrologicalSubjectFactory.from_birth_data(**person2_args)
+    person2 = SubjectFactory.from_birth_data(**person2_args)
 
     # CompositeSubjectFactory refuses two different *requested* house systems,
     # so if only one person fell back to Porphyry, cast both with Porphyry
@@ -862,18 +982,17 @@ def generate_composite_chart(
     matched = None
     fallen1, fallen2 = fell_back(person1, house_system), fell_back(person2, house_system)
     if fallen1 != fallen2:
-        person1 = AstrologicalSubjectFactory.from_birth_data(
+        person1 = SubjectFactory.from_birth_data(
             **{**person1_args, "houses_system_identifier": PORPHYRY})
-        person2 = AstrologicalSubjectFactory.from_birth_data(
+        person2 = SubjectFactory.from_birth_data(
             **{**person2_args, "houses_system_identifier": PORPHYRY})
         matched = ("person2", "person1") if fallen1 else ("person1", "person2")
 
     # Create composite subject
-    composite_factory = CompositeSubjectFactory(person1, person2)
-    composite_subject = composite_factory.get_midpoint_composite_subject_model()
+    composite = composite_subject(person1, person2)
     
     # Create composite chart data
-    composite_data = ChartDataFactory.create_composite_chart_data(composite_subject, **ASPECT_SETTINGS)
+    composite_data = ChartDataFactory.create_composite_chart_data(composite, **ASPECT_SETTINGS)
     
     result = {
         "status": "success",
@@ -882,7 +1001,7 @@ def generate_composite_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(composite_data),
+        "text": context_text(composite_data),
     }
     report_polar_fallback(result, house_system, {"person1": person1, "person2": person2}, matched)
 
@@ -1040,7 +1159,7 @@ def generate_planetary_return(
             return_day = 1
 
     # Create natal subject
-    natal = AstrologicalSubjectFactory.from_birth_data(
+    natal = SubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -1073,7 +1192,7 @@ def generate_planetary_return(
     # builds ignores the requested house system (always Placidus). Rebuild
     # the return subject at that moment with the settings actually requested,
     # so applied_settings stays truthful by construction.
-    return_subject = AstrologicalSubjectFactory.from_iso_utc_time(
+    return_subject = SubjectFactory.from_iso_utc_time(
         name=f"{name} {return_type} Return",
         iso_utc_time=return_model.iso_formatted_utc_datetime,
         lat=search_lat, lng=search_lng, tz_str=search_tz_str,
@@ -1095,7 +1214,7 @@ def generate_planetary_return(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(return_data),
+        "text": context_text(return_data, chart_type=f"{return_type} Return"),
     }
     report_polar_fallback(result, house_system, {"return": return_subject})
     
@@ -1179,7 +1298,7 @@ def generate_event_chart(
     city, nation = resolve_location(city, nation, lat, lng)
 
     # Create subject for the event moment
-    event_subject = AstrologicalSubjectFactory.from_birth_data(
+    event_subject = SubjectFactory.from_birth_data(
         name=event_name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -1201,7 +1320,7 @@ def generate_event_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(chart_data),
+        "text": context_text(chart_data, chart_type="Event"),
     }
     report_polar_fallback(result, house_system, {"event": event_subject})
     
@@ -1268,7 +1387,7 @@ def get_current_positions(
     city, nation = resolve_location(city, nation, lat, lng)
 
     # Create subject for current time
-    now = AstrologicalSubjectFactory.from_current_time(
+    now = SubjectFactory.from_current_time(
         name="Current Positions",
         lat=lat, lng=lng, tz_str=tz_str,
         city=city, nation=nation,
@@ -1282,11 +1401,11 @@ def get_current_positions(
     result = {
         "status": "success",
         "chart_type": "Current Positions",
-        "timestamp": str(now.utc_time) if hasattr(now, 'utc_time') else "current",
+        "timestamp": now.iso_formatted_local_datetime,
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, language=language
         ),
-        "text": to_context(now),
+        "text": context_text(now, data_tag="moment"),
     }
     report_polar_fallback(result, house_system, {"now": now})
     
@@ -1348,7 +1467,7 @@ def get_aspects(
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
 
-    subject = AstrologicalSubjectFactory.from_birth_data(
+    subject = SubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -1441,7 +1560,7 @@ def get_synastry_aspects(
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
 
-    person1 = AstrologicalSubjectFactory.from_birth_data(
+    person1 = SubjectFactory.from_birth_data(
         name=name1, year=year1, month=month1, day=day1,
         hour=hour1, minute=minute1,
         lat=lat1, lng=lng1, tz_str=tz_str1,
@@ -1452,7 +1571,7 @@ def get_synastry_aspects(
         active_points=ACTIVE_POINTS,
     )
 
-    person2 = AstrologicalSubjectFactory.from_birth_data(
+    person2 = SubjectFactory.from_birth_data(
         name=name2, year=year2, month=month2, day=day2,
         hour=hour2, minute=minute2,
         lat=lat2, lng=lng2, tz_str=tz_str2,
@@ -1541,7 +1660,7 @@ def get_chart_patterns(
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
 
-    subject = AstrologicalSubjectFactory.from_birth_data(
+    subject = SubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -1590,6 +1709,24 @@ def get_chart_patterns(
 # Server Entry Point
 # =============================================================================
 
+def warm_up() -> None:
+    """
+    Cast one chart so kerykeion's lazy imports happen before serving.
+
+    kerykeion imports libephemeris (and with it erfa and numpy) the first time
+    a subject is built, from its fixed-star catalog. On Windows, loading those
+    native extensions blocks while the stdio transport's reader thread has a
+    read pending on stdin, so a tool call that triggered it froze the whole
+    event loop until the client sent another message: a batch of calls from
+    Claude Desktop then timed out together. Done here, nothing is reading yet.
+    """
+    subject = SubjectFactory.from_birth_data(
+        name="warm-up", year=2000, month=1, day=1, hour=12, minute=0,
+        lat=51.5, lng=0.0, tz_str="UTC", online=False, active_points=ACTIVE_POINTS,
+    )
+    to_context(ChartDataFactory.create_natal_chart_data(subject, **ASPECT_SETTINGS))
+
+
 def main():
     """Start the MCP server."""
     import argparse
@@ -1603,6 +1740,7 @@ def main():
 
     logger.info("Starting Kerykeion MCP Server")
     logger.info(f"PNG conversion available: {HAS_CAIROSVG}")
+    warm_up()
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(

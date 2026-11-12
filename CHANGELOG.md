@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1
+
+### Fixed
+- **The first call to a fresh server no longer hangs on Windows.** It froze until the client sent another message, and a call with nothing after it got no reply at all (none within 30 s, 3 of 3 times). kerykeion loads numpy on the first chart, and on Windows that native load blocks while the stdio reader waits on stdin. The server now casts one chart at start-up, before it reads stdin. Batches of calls weren't affected: the next message unblocked the stall, and 10 of 10 three-call batches answered in about 10 s.
+- **Composite houses are hung from the Ascendant, as immanuel does.** kerykeion's default anchor sometimes held the Midheaven instead. **About 7% of composites turn 180°**: Ascendant, MC and all twelve cusps (40 of 576 London/Svalbard pairs). With the same house system for both people, composites now match immanuel 0.12.2 to 0.0000°.
+- **An angle moving backwards is flagged retrograde.** Inside the polar circles the Ascendant (and Descendant) really runs backwards through the zodiac for part of the day, but was marked `motion="direct"` beside its negative speed. The signed speed is kept, and the flag now follows it (speeds within 1e-6 of zero count as direct). immanuel 0.12.2 still reports these as not retrograde.
+- **`transit_time` gives the moment actually cast**, in ISO format with the zone offset (e.g. `"2020-01-01T12:00:00+01:00"`), not `"current"`. `get_current_positions.timestamp` likewise.
+- Return and event charts' text reads `<chart_analysis type="Solar Return">` / `"Lunar Return"` / `"Event"`, not `"Natal"`. Synastry and composite text is unchanged.
+
+### Changed
+- **Breaking:** a timed chart exactly at a pole (latitude ±90), for any subject or location, is refused with `{"status": "error", "type": "PoleError", ...}`. There is no horizon there, and the Ascendant came out as 0° Aries with speed 0. Use ±89.99. Other errors have no `type` key.
+- **Contract change:** when a synastry or transit mixes house systems (one polar person, Placidus/Koch → Porphyry), `applied_settings.house_system` describes both, e.g. `"mixed: person1 P (Placidus); person2 O (Porphyry, polar fallback from P Placidus)"`, instead of naming only the fallback. A second warning names who has which. Each chart keeps its own houses because each overlay reads the houses of the chart it lands in; a composite has one set of houses, so it still casts both people with Porphyry.
+- **Contract change:** with city or nation left blank, the text's `city`/`nation` fields stay empty (`city="" nation=""`) instead of holding coordinates; the element's `lat`/`lng` carry them. The wheel label still shows them ("41.90N, 12.50E").
+- **Contract change:** `get_current_positions` text labels its block `<moment …>` instead of `<birth_data …>`.
+
 ## 0.3.0
 
 ### Changed

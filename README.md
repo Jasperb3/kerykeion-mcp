@@ -23,7 +23,7 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 
 - **Zodiac**: Tropical by default. Sidereal is supported on every chart tool via `zodiac_type="Sidereal"`, but requires an explicit `sidereal_mode` (e.g. `"LAHIRI"`, the standard ayanamsha for Vedic/Jyotish work) -- the server will reject a sidereal request with no mode rather than silently picking one.
 - **House system**: Placidus (`"P"`) by default. Other systems (Whole Sign `"W"`, Koch `"K"`, Equal `"A"`, Campanus `"C"`, Regiomontanus `"R"`, Morinus `"M"`, Porphyry `"O"`) are available via `house_system`.
-- **Polar latitudes**: charts are cast at their true latitude. Inside the polar circles (beyond about ±66.56°) Placidus and Koch houses don't exist, so kerykeion uses Porphyry cusps, as the Swiss Ephemeris itself does, and the server **reports it**: `applied_settings.house_system` reads `"O (Porphyry, polar fallback from P Placidus)"`, a `warnings` list explains why, and the `text` starts with the same warning. Two-subject tools add `applied_settings.house_system_by_subject`. Every other system (Porphyry, Regiomontanus, Campanus, Equal, Whole Sign, Morinus) is cast as asked. The Ascendant, MC, planets, planet-to-planet aspects and patterns don't depend on the house system.
+- **Polar latitudes**: charts are cast at their true latitude. Inside the polar circles (beyond about ±66.56°) Placidus and Koch houses don't exist, so kerykeion uses Porphyry cusps, as the Swiss Ephemeris itself does, and the server **reports it**: `applied_settings.house_system` reads `"O (Porphyry, polar fallback from P Placidus)"`, a `warnings` list explains why, and the `text` starts with the same warning. Two-subject tools add `applied_settings.house_system_by_subject`. Synastry and transit charts keep each chart's own houses, because each house overlay reads the houses of the chart it lands in: with one polar person, `applied_settings.house_system` reads e.g. `"mixed: person1 P (Placidus); person2 O (Porphyry, polar fallback from P Placidus)"` and a second warning names who has which. A composite has a single set of houses, so it casts both people with Porphyry instead (also reported). Every other system (Porphyry, Regiomontanus, Campanus, Equal, Whole Sign, Morinus) is cast as asked. The Ascendant, MC, planets, planet-to-planet aspects and patterns don't depend on the house system.
 - **Interpretation text**: the `text` field in every response is Kerykeion's structured `to_context` output -- positions, aspects, and dignities. It is not a synthesized reading; synthesis happens in the consuming LLM, guided by the server's interpretation-framing instructions (developmental framing, no fatalistic/medical predictions, birth-time-confidence caveats for house-dependent claims).
 - **Relationship score**: `generate_synastry_chart`'s `relationship_score` uses Ciro Discepolo's method -- a count of specific aspect contacts, not a holistic verdict on relationship viability.
 - **Validation**: meaning-bearing parameters (house system, zodiac type, sidereal mode, chart style) are rejected with an educational error if invalid, never silently substituted. The one exception is the reported polar fallback above. Every successful response includes `applied_settings`, echoing exactly what was computed.
@@ -84,7 +84,9 @@ uv run pytest -q
 |---|---|
 | `test_astrological_correctness.py` | Golden-value regression checks against the live Kerykeion/Swiss Ephemeris install (e.g. known Sun sign for a fixed birth) |
 | `test_contracts.py` | Response shape -- `status`, `applied_settings`, error format |
-| `test_polar.py` | Polar latitudes: true latitude kept, cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool |
+| `test_polar.py` | Polar latitudes: true latitude kept, cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool, pole charts are refused, a backwards polar Ascendant is flagged retrograde |
+| `test_composite.py` | Composite houses hang from the Ascendant (immanuel's construction) over a London/Svalbard grid: cusp midpoints, Asc on cusp 1, MC on cusp 10, planet houses |
+| `test_startup.py` | `main()` loads kerykeion's lazy native imports before serving stdio (the Windows first-call stall) |
 | `test_engine.py` | The Swiss Ephemeris backend with its data files (not libephemeris, not Moshier); planets match the immanuel engine |
 | `test_patterns.py` | Pattern-detection logic in `patterns.py` (stelliums, T-squares, yods, etc.) against synthetic aspect fixtures |
 | `test_security.py` | Output-path confinement, PII-in-logs, loopback-only HTTP bind |
@@ -231,6 +233,8 @@ A chart inside a polar circle cast with Placidus or Koch also carries a `warning
   "text": "Warning: A chart in this response lies inside a polar circle, ..."
 }
 ```
+
+Exactly at a pole (latitude ±90) there is no horizon, so a timed chart is refused for every subject and location with `"type": "PoleError"`; use ±89.99.
 
 Invalid input returns a structured error instead of a raw exception:
 

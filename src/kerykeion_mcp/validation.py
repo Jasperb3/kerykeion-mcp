@@ -41,9 +41,12 @@ VALID_CHART_STYLES = ["full", "wheel_only", "aspect_grid"]
 class ChartInputError(ValueError):
     """Raised for invalid chart input; carries an educational message and hint."""
 
-    def __init__(self, message: str, hint: str = ""):
+    def __init__(self, message: str, hint: str = "", error_type: Optional[str] = None):
         self.message = message
         self.hint = hint
+        # A machine-readable category (e.g. "PoleError", as the immanuel
+        # server reports it); most errors don't need one.
+        self.error_type = error_type
         super().__init__(message)
 
 
@@ -132,6 +135,21 @@ def validate_coordinates(lat: float, lng: float, label: str = "") -> None:
         raise ChartInputError(
             f"{prefix}Latitude {lat} is outside the valid range -90 to +90 (positive = North).",
             hint=hint,
+        )
+    if abs(lat) == 90:
+        # Every chart this server casts is timed, and at a pole the horizon
+        # and the meridian are undefined: the Swiss Ephemeris still returns
+        # numbers (an Ascendant of 0 Aries with speed 0 at -90), which then
+        # produce spurious exact aspects to the angles.
+        raise ChartInputError(
+            f"{prefix}Latitude {lat:g} is a geographic pole. There is no horizon or meridian "
+            "there, so the Ascendant, Midheaven and houses are undefined.",
+            hint=(
+                f"Use latitude {'89.99' if lat > 0 else '-89.99'} for a timed chart. For a chart "
+                "without a birth time, use 12:00 at any latitude off the pole and read only the "
+                "planets, not the angles or houses (the Moon can then be up to about 7 degrees out)."
+            ),
+            error_type="PoleError",
         )
     if not (-180 <= lng <= 180):
         hint = ""

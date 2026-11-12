@@ -266,17 +266,38 @@ def test_current_positions_report_the_fallback():
     assert_fallback_reported(get_current_positions(lat=69.65, lng=18.95, tz_str="Europe/Oslo"))
 
 
+def assert_mixed_reported(result, fallen, kept, kept_system="P (Placidus)"):
+    """One subject fell back and the other kept the requested system."""
+    assert result["status"] == "success", result
+    settings = result["applied_settings"]
+    assert settings["house_system_by_subject"] == {fallen: PLACIDUS_FALLBACK, kept: kept_system}
+    assert settings["house_system"] == "mixed: " + "; ".join(
+        f"{label} {system}" for label, system in settings["house_system_by_subject"].items())
+    assert PLACIDUS_WARNING in result["warnings"]
+    assert any(w.startswith(f"{fallen}'s houses are {PLACIDUS_FALLBACK}") and f"{kept}'s are {kept_system}" in w
+               for w in result["warnings"]), result["warnings"]
+
+
 def test_synastry_with_one_polar_subject_reports_per_subject():
     result = generate_synastry_chart(**pair(TROMSO, LONDON), output_format="text")
-    assert_fallback_reported(result)
-    assert result["applied_settings"]["house_system_by_subject"] == {
-        "person1": PLACIDUS_FALLBACK, "person2": "P (Placidus)",
-    }
+    assert_mixed_reported(result, "person1", "person2")
+    assert result["applied_settings"]["house_system"] == (
+        "mixed: person1 O (Porphyry, polar fallback from P Placidus); person2 P (Placidus)")
     aspects = get_synastry_aspects(**pair(LONDON, TROMSO))
-    assert_fallback_reported(aspects)
-    assert aspects["applied_settings"]["house_system_by_subject"] == {
-        "person1": "P (Placidus)", "person2": PLACIDUS_FALLBACK,
-    }
+    assert_mixed_reported(aspects, "person2", "person1")
+
+
+def test_synastry_mixed_warning_leads_the_text():
+    result = generate_synastry_chart(**pair(LONDON, POLAR_PLACES["McMurdo"]), output_format="text")
+    assert_mixed_reported(result, "person2", "person1")
+    for warning in result["warnings"]:
+        assert f"Warning: {warning}" in result["text"].split("<", 1)[0]
+
+
+def test_synastry_with_two_polar_subjects_is_not_mixed():
+    result = generate_synastry_chart(**pair(TROMSO, POLAR_PLACES["McMurdo"]), output_format="text")
+    assert_fallback_reported(result)
+    assert result["warnings"] == [PLACIDUS_WARNING]
 
 
 def test_composite_with_one_polar_subject_casts_both_with_porphyry():
@@ -311,10 +332,7 @@ def test_transit_with_polar_natal_place():
         **natal_args(TROMSO), transit_lat=51.5, transit_lng=0.0, transit_tz_str="Europe/London",
         **TRANSIT_TIME, output_format="text",
     )
-    assert_fallback_reported(result)
-    assert result["applied_settings"]["house_system_by_subject"] == {
-        "natal": PLACIDUS_FALLBACK, "transit": "P (Placidus)",
-    }
+    assert_mixed_reported(result, "natal", "transit")
 
 
 def test_transit_with_polar_transit_place():
@@ -322,10 +340,7 @@ def test_transit_with_polar_transit_place():
         **natal_args(LONDON), transit_lat=69.65, transit_lng=18.95, transit_tz_str="Europe/Oslo",
         **TRANSIT_TIME, output_format="text",
     )
-    assert_fallback_reported(result)
-    assert result["applied_settings"]["house_system_by_subject"] == {
-        "natal": "P (Placidus)", "transit": PLACIDUS_FALLBACK,
-    }
+    assert_mixed_reported(result, "transit", "natal")
 
 
 RETURN_DATE = dict(return_year=2026, return_month=1, return_day=1)
@@ -382,3 +397,99 @@ def test_lunar_return_relocated_out_of_the_circle():
         return_lat=51.5, return_lng=-0.12, return_tz_str="Europe/London", output_format="text",
     )
     assert_not_reported(result)
+
+
+# --- exactly at a pole: no horizon, so no Ascendant, MC or houses ------------
+
+POLE = dict(LONDON, lat=-90.0, lng=0.0, tz_str="UTC")
+
+
+def assert_pole_error(result):
+    assert result["status"] == "error", result
+    assert result["type"] == "PoleError"
+    assert "pole" in result["error"].lower()
+    assert "89.99" in result["hint"]
+    assert "birth time" in result["hint"]
+
+
+@pytest.mark.parametrize("lat", [90.0, -90.0])
+def test_pole_charts_are_rejected_for_every_subject(lat):
+    pole = dict(POLE, lat=lat)
+    assert_pole_error(generate_natal_chart(name="t", **pole, output_format="text"))
+    assert_pole_error(generate_event_chart(event_name="t", **pole, output_format="text"))
+    assert_pole_error(get_aspects(name="t", **pole))
+    assert_pole_error(get_chart_patterns(name="t", **pole))
+    assert_pole_error(get_current_positions(lat=lat, lng=0.0, tz_str="UTC"))
+    assert_pole_error(generate_synastry_chart(**pair(LONDON, pole), output_format="text"))
+    assert_pole_error(get_synastry_aspects(**pair(pole, LONDON)))
+    assert_pole_error(generate_composite_chart(**pair(LONDON, pole), output_format="text"))
+    assert_pole_error(generate_transit_chart(
+        **natal_args(pole), transit_lat=51.5, transit_lng=0.0, transit_tz_str="Europe/London",
+        **TRANSIT_TIME, output_format="text"))
+    assert_pole_error(generate_transit_chart(
+        **natal_args(LONDON), transit_lat=lat, transit_lng=0.0, transit_tz_str="UTC",
+        **TRANSIT_TIME, output_format="text"))
+    assert_pole_error(generate_planetary_return(name="t", **pole, **RETURN_DATE, output_format="text"))
+    assert_pole_error(generate_planetary_return(
+        name="t", **LONDON, **RETURN_DATE, return_lat=lat, return_lng=0.0, return_tz_str="UTC",
+        output_format="text"))
+
+
+def test_just_off_the_pole_is_cast():
+    result = generate_natal_chart(name="t", **dict(POLE, lat=-89.99), output_format="text")
+    assert result["status"] == "success", result
+
+
+def test_other_errors_carry_no_type(birth_rome):
+    result = generate_natal_chart(**dict(birth_rome, lng=500.0), output_format="text")
+    assert result["status"] == "error"
+    assert "type" not in result
+
+
+# --- the angles' motion --------------------------------------------------------
+# Inside the polar circles the Ascendant really runs backwards through the
+# zodiac for part of the day (the Swiss Ephemeris speed matches a finite
+# difference); kerykeion hard-codes the angles as direct.
+
+SVALBARD_BACKWARD = dict(year=1990, month=6, day=15, hour=2, minute=0, lat=78.22, lng=15.63, tz_str="UTC")
+
+
+def point(text, name):
+    return re.search(rf'<point name="{name}" [^>]*motion="(\w+)" speed="(-?[\d.]+)"', text).groups()
+
+
+def test_a_backward_polar_ascendant_is_reported_retrograde():
+    text = generate_natal_chart(name="t", **SVALBARD_BACKWARD, house_system="W", output_format="text")["text"]
+    for name in ("Ascendant", "Descendant"):
+        motion, speed = point(text, name)
+        assert float(speed) == pytest.approx(-113.68, abs=0.01)
+        assert motion == "retrograde"
+    for name in ("Medium_Coeli", "Imum_Coeli"):
+        motion, speed = point(text, name)
+        assert float(speed) > 0 and motion == "direct"
+
+
+def test_ordinary_angles_stay_direct():
+    text = generate_natal_chart(name="t", **LONDON, output_format="text")["text"]
+    for name in ("Ascendant", "Descendant", "Medium_Coeli", "Imum_Coeli"):
+        motion, speed = point(text, name)
+        assert float(speed) > 0 and motion == "direct"
+
+
+def test_a_near_zero_angle_speed_is_not_retrograde():
+    from kerykeion_mcp.server import fix_axis_motion
+    subject = build(LONDON, active_points=None)
+    subject.ascendant.speed = -1e-9
+    assert fix_axis_motion(subject).ascendant.retrograde is False
+
+
+def test_every_tool_reports_the_backward_ascendant():
+    transit = generate_transit_chart(
+        **natal_args(LONDON), transit_lat=78.22, transit_lng=15.63, transit_tz_str="UTC",
+        **{f"transit_{k}": v for k, v in SVALBARD_BACKWARD.items() if k in ("year", "month", "day", "hour", "minute")},
+        house_system="W", output_format="text")
+    synastry = generate_synastry_chart(**pair(LONDON, SVALBARD_BACKWARD), house_system="W", output_format="text")
+    event = generate_event_chart(event_name="t", **SVALBARD_BACKWARD, house_system="W", output_format="text")
+    for result in (transit, synastry, event):
+        assert result["status"] == "success", result
+        assert re.search(r'<point name="Ascendant" [^>]*motion="retrograde" speed="-113.679', result["text"])

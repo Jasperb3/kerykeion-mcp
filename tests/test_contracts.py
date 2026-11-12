@@ -81,6 +81,35 @@ def test_transit_chart_contract(birth_rome):
     assert "text" in result
 
 
+def transit_at(birth_rome, **when):
+    return generate_transit_chart(
+        natal_name=birth_rome["name"], natal_year=birth_rome["year"],
+        natal_month=birth_rome["month"], natal_day=birth_rome["day"],
+        natal_hour=birth_rome["hour"], natal_minute=birth_rome["minute"],
+        natal_lat=birth_rome["lat"], natal_lng=birth_rome["lng"], natal_tz_str=birth_rome["tz_str"],
+        transit_lat=birth_rome["lat"], transit_lng=birth_rome["lng"], transit_tz_str=birth_rome["tz_str"],
+        output_format="text", **when,
+    )
+
+
+def test_transit_time_echoes_an_explicit_transit_moment(birth_rome):
+    result = transit_at(birth_rome, transit_year=2020, transit_month=1, transit_day=1,
+                        transit_hour=12, transit_minute=0)
+    assert result["transit_time"] == "2020-01-01T12:00:00+01:00"
+
+
+def test_transit_time_and_timestamp_are_iso_for_now(birth_rome):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    stamps = [
+        transit_at(birth_rome)["transit_time"],
+        get_current_positions(lat=birth_rome["lat"], lng=birth_rome["lng"],
+                              tz_str=birth_rome["tz_str"])["timestamp"],
+    ]
+    for stamp in stamps:
+        assert abs(datetime.fromisoformat(stamp) - now) < timedelta(minutes=2), stamp
+
+
 def test_composite_chart_contract(birth_rome, birth_london):
     result = generate_composite_chart(
         name1=birth_rome["name"], year1=birth_rome["year"], month1=birth_rome["month"],
@@ -145,26 +174,27 @@ import re
 
 
 def places(result):
-    """Each subject's "{city}, {nation}" -- how the wheel prints it -- from the text."""
-    return [f"{city}, {nation}" for city, nation in re.findall(
-        r'<(?:birth|transit)_data [^>]*city="([^"]*)" nation="([^"]*)"', result["text"])]
+    """Each subject's structured (city, nation) fields from the text."""
+    return re.findall(r'<(?:birth|transit)_data [^>]*city="([^"]*)" nation="([^"]*)"', result["text"])
 
 
-def birth_data_line(result):
+def birth_data_place(result):
     return places(result)[0]
 
 
-def test_city_without_nation_shows_coordinates_not_gb(birth_rome, tmp_output_dir):
+def test_city_without_nation_leaves_nation_empty_but_labels_the_wheel(birth_rome, tmp_output_dir):
     result = generate_natal_chart(**birth_rome, city="Rome", output_format="all", output_dir=tmp_output_dir)
-    assert birth_data_line(result).endswith("Rome, 41.90N 12.50E")
+    assert birth_data_place(result) == ("Rome", "")
+    assert 'lat="41.90" lng="12.50"' in result["text"]
     svg = open(result["svg_path"], encoding="utf-8").read()
     assert "Rome, 41.90N 12.50E" in svg
     assert ", GB" not in svg
 
 
-def test_no_city_or_nation_shows_only_coordinates(birth_rome, tmp_output_dir):
+def test_no_city_or_nation_leaves_both_empty_but_labels_the_wheel(birth_rome, tmp_output_dir):
     result = generate_natal_chart(**birth_rome, output_format="all", output_dir=tmp_output_dir)
-    assert birth_data_line(result) == "41.90N, 12.50E"
+    assert birth_data_place(result) == ("", "")
+    assert "41.90N" not in result["text"]
     svg = open(result["svg_path"], encoding="utf-8").read()
     assert "41.90N, 12.50E" in svg
     assert ", GB" not in svg
@@ -172,12 +202,12 @@ def test_no_city_or_nation_shows_only_coordinates(birth_rome, tmp_output_dir):
 
 def test_explicit_nation_is_kept(birth_rome):
     result = generate_natal_chart(**birth_rome, city="Rome", nation="IT", output_format="text")
-    assert birth_data_line(result).endswith("Rome, IT")
+    assert birth_data_place(result) == ("Rome", "IT")
 
 
 def test_nation_without_city_keeps_nation(birth_rome):
     result = generate_natal_chart(**birth_rome, nation="IT", output_format="text")
-    assert birth_data_line(result).endswith("41.90N, 12.50E, IT")
+    assert birth_data_place(result) == ("", "IT")
 
 
 def test_second_subject_label_has_no_gb(birth_rome, birth_london):
@@ -190,8 +220,13 @@ def test_second_subject_label_has_no_gb(birth_rome, birth_london):
         lat2=birth_london["lat"], lng2=birth_london["lng"], tz_str2=birth_london["tz_str"],
         city2="London", output_format="text",
     )
-    assert "London, 51.51N 0.13W" in places(result)
+    assert places(result) == [("", ""), ("London", "")]
     assert ", GB" not in result["text"]
+
+
+def test_svalbard_current_positions_leave_the_place_fields_empty():
+    result = get_current_positions(lat=78.22, lng=15.63, tz_str="UTC")
+    assert re.search(r'city="" nation="" lat="78.22" lng="15.63"', result["text"])
 
 
 def test_transit_place_is_labelled_with_its_coordinates(birth_rome, tmp_output_dir):
@@ -210,7 +245,8 @@ def test_transit_place_is_labelled_with_its_coordinates(birth_rome, tmp_output_d
     for output in (result["text"], svg):
         assert "Greenwich" not in output
         assert ", GB" not in output
-    assert "69.65N, 18.95E" in result["text"] + svg
+    assert places(result) == [("Rome", "IT"), ("", "")]
+    assert "69.65N, 18.95E" in svg
 
 
 # --- PNG conversion -------------------------------------------------------
@@ -253,3 +289,40 @@ def test_chart_text_keeps_the_5x_points(birth_rome):
     points = set(re.findall(r'<point name="([^"]+)"', text))
     assert {"Mean_Lilith", "True_South_Lunar_Node", "Descendant", "Imum_Coeli"} <= points
     assert len(points) == 18
+
+
+# --- chart labels in the text ------------------------------------------------
+
+def test_current_positions_text_calls_its_block_moment(birth_rome):
+    text = get_current_positions(lat=birth_rome["lat"], lng=birth_rome["lng"], tz_str=birth_rome["tz_str"])["text"]
+    assert re.search(r'<moment date="[^"]+" city="" nation="" lat="41.90"', text)
+    assert "<birth_data" not in text
+
+
+def test_return_and_event_text_carry_their_own_chart_type(birth_rome):
+    solar = generate_planetary_return(**birth_rome, return_type="Solar", return_year=2020, output_format="text")
+    lunar = generate_planetary_return(**birth_rome, return_type="Lunar", return_year=2020, output_format="text")
+    event = dict(birth_rome)
+    event = generate_event_chart(event_name=event.pop("name"), **event, output_format="text")
+    for result, chart_type in ((solar, "Solar Return"), (lunar, "Lunar Return"), (event, "Event")):
+        assert f'<chart_analysis type="{chart_type}">' in result["text"]
+        assert 'type="Natal"' not in result["text"]
+    natal = generate_natal_chart(**birth_rome, output_format="text")
+    assert '<chart_analysis type="Natal">' in natal["text"]
+
+
+def test_synastry_and_composite_text_is_kerykeions_own(birth_rome, birth_london):
+    from kerykeion import AstrologicalSubjectFactory, ChartDataFactory, CompositeSubjectFactory, to_context
+    from kerykeion_mcp.server import ACTIVE_POINTS, ASPECT_SETTINGS, context_text
+
+    def subject(birth, city, nation):
+        return AstrologicalSubjectFactory.from_birth_data(
+            **birth, city=city, nation=nation, online=False, active_points=ACTIVE_POINTS)
+
+    first, second = subject(birth_rome, "Rome", "IT"), subject(birth_london, "London", "GB")
+    synastry = ChartDataFactory.create_synastry_chart_data(first, second, **ASPECT_SETTINGS)
+    composite = ChartDataFactory.create_composite_chart_data(
+        CompositeSubjectFactory(first, second).get_midpoint_composite_subject_model(), **ASPECT_SETTINGS)
+    for data, chart_type in ((synastry, "Synastry"), (composite, "Composite")):
+        assert context_text(data) == to_context(data)
+        assert f'<chart_analysis type="{chart_type}">' in context_text(data)
