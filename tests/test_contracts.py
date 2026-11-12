@@ -174,26 +174,27 @@ import re
 
 
 def places(result):
-    """Each subject's "{city}, {nation}" -- how the wheel prints it -- from the text."""
-    return [f"{city}, {nation}" for city, nation in re.findall(
-        r'<(?:birth|transit)_data [^>]*city="([^"]*)" nation="([^"]*)"', result["text"])]
+    """Each subject's structured (city, nation) fields from the text."""
+    return re.findall(r'<(?:birth|transit)_data [^>]*city="([^"]*)" nation="([^"]*)"', result["text"])
 
 
-def birth_data_line(result):
+def birth_data_place(result):
     return places(result)[0]
 
 
-def test_city_without_nation_shows_coordinates_not_gb(birth_rome, tmp_output_dir):
+def test_city_without_nation_leaves_nation_empty_but_labels_the_wheel(birth_rome, tmp_output_dir):
     result = generate_natal_chart(**birth_rome, city="Rome", output_format="all", output_dir=tmp_output_dir)
-    assert birth_data_line(result).endswith("Rome, 41.90N 12.50E")
+    assert birth_data_place(result) == ("Rome", "")
+    assert 'lat="41.90" lng="12.50"' in result["text"]
     svg = open(result["svg_path"], encoding="utf-8").read()
     assert "Rome, 41.90N 12.50E" in svg
     assert ", GB" not in svg
 
 
-def test_no_city_or_nation_shows_only_coordinates(birth_rome, tmp_output_dir):
+def test_no_city_or_nation_leaves_both_empty_but_labels_the_wheel(birth_rome, tmp_output_dir):
     result = generate_natal_chart(**birth_rome, output_format="all", output_dir=tmp_output_dir)
-    assert birth_data_line(result) == "41.90N, 12.50E"
+    assert birth_data_place(result) == ("", "")
+    assert "41.90N" not in result["text"]
     svg = open(result["svg_path"], encoding="utf-8").read()
     assert "41.90N, 12.50E" in svg
     assert ", GB" not in svg
@@ -201,12 +202,12 @@ def test_no_city_or_nation_shows_only_coordinates(birth_rome, tmp_output_dir):
 
 def test_explicit_nation_is_kept(birth_rome):
     result = generate_natal_chart(**birth_rome, city="Rome", nation="IT", output_format="text")
-    assert birth_data_line(result).endswith("Rome, IT")
+    assert birth_data_place(result) == ("Rome", "IT")
 
 
 def test_nation_without_city_keeps_nation(birth_rome):
     result = generate_natal_chart(**birth_rome, nation="IT", output_format="text")
-    assert birth_data_line(result).endswith("41.90N, 12.50E, IT")
+    assert birth_data_place(result) == ("", "IT")
 
 
 def test_second_subject_label_has_no_gb(birth_rome, birth_london):
@@ -219,8 +220,13 @@ def test_second_subject_label_has_no_gb(birth_rome, birth_london):
         lat2=birth_london["lat"], lng2=birth_london["lng"], tz_str2=birth_london["tz_str"],
         city2="London", output_format="text",
     )
-    assert "London, 51.51N 0.13W" in places(result)
+    assert places(result) == [("", ""), ("London", "")]
     assert ", GB" not in result["text"]
+
+
+def test_svalbard_current_positions_leave_the_place_fields_empty():
+    result = get_current_positions(lat=78.22, lng=15.63, tz_str="UTC")
+    assert re.search(r'city="" nation="" lat="78.22" lng="15.63"', result["text"])
 
 
 def test_transit_place_is_labelled_with_its_coordinates(birth_rome, tmp_output_dir):
@@ -239,7 +245,8 @@ def test_transit_place_is_labelled_with_its_coordinates(birth_rome, tmp_output_d
     for output in (result["text"], svg):
         assert "Greenwich" not in output
         assert ", GB" not in output
-    assert "69.65N, 18.95E" in result["text"] + svg
+    assert places(result) == [("Rome", "IT"), ("", "")]
+    assert "69.65N, 18.95E" in svg
 
 
 # --- PNG conversion -------------------------------------------------------

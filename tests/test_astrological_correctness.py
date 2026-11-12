@@ -118,8 +118,10 @@ def test_relocated_lunar_return_carries_return_location_label(birth_rome):
     assert birth_location["status"] == "success"
     assert relocated["status"] == "success"
     assert relocated["text"] != birth_location["text"]
-    assert 'city="51.51N" nation="0.13W"' in relocated["text"]
-    assert "51.51N" not in birth_location["text"]
+    # The structured place fields are the caller's (blank here); the
+    # coordinates are the return location's.
+    assert 'city="" nation="" lat="51.51" lng="-0.13"' in relocated["text"]
+    assert 'city="Rome" nation="IT" lat="41.90"' in birth_location["text"]
 
 
 def test_sidereal_return_rejected_with_educational_error(birth_rome):

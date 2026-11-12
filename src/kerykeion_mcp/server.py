@@ -8,6 +8,7 @@ ChatGPT Desktop via standard MCP transport.
 
 import functools
 import logging
+import re
 from datetime import datetime
 from typing import Optional, Literal
 
@@ -236,6 +237,29 @@ def resolve_location(city: str, nation: str, lat: float, lng: float) -> tuple[st
         return f"{lat_label}, {lng_label}", nation
     return lat_label, lng_label
 
+
+_LAT = r"\d+\.\d{2}[NS]"
+_LNG = r"\d+\.\d{2}[EW]"
+# The coordinate fill-ins resolve_location makes: city "LAT, LNG" or "LAT",
+# nation "LAT LNG" or "LNG".
+_FILLED_CITY = re.compile(rf'(<(?:birth|transit)_data [^>]*?)city="(?:{_LAT}, {_LNG}|{_LAT})"')
+_FILLED_NATION = re.compile(rf'(<(?:birth|transit)_data [^>]*?)nation="(?:{_LAT} {_LNG}|{_LNG})"')
+
+
+def context_text(chart) -> str:
+    """
+    kerykeion's to_context text for `chart`, with the structured place fields
+    left as the caller gave them.
+
+    resolve_location fills a blank city/nation with coordinates so the wheel
+    label never reads "Greenwich, GB"; in the text those fill-ins would sit in
+    the city and nation fields ("78.22N", "15.63E"). They are emptied there --
+    the element's lat/lng attributes already carry the coordinates.
+    """
+    text = to_context(chart)
+    text = _FILLED_CITY.sub(r'\1city=""', text)
+    return _FILLED_NATION.sub(r'\1nation=""', text)
+
 # Server instructions for AI assistants
 SERVER_INSTRUCTIONS = """
 Kerykeion MCP Server - Astrological Chart Generation
@@ -443,7 +467,7 @@ def generate_natal_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(chart_data),
+        "text": context_text(chart_data),
     }
     report_polar_fallback(result, house_system, {"natal": subject})
 
@@ -589,7 +613,7 @@ def generate_synastry_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(synastry_data),
+        "text": context_text(synastry_data),
     }
     report_polar_fallback(result, house_system, {"person1": person1, "person2": person2})
     
@@ -761,7 +785,7 @@ def generate_transit_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(transit_data),
+        "text": context_text(transit_data),
     }
     report_polar_fallback(result, house_system, {"natal": natal, "transit": transit})
     
@@ -913,7 +937,7 @@ def generate_composite_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(composite_data),
+        "text": context_text(composite_data),
     }
     report_polar_fallback(result, house_system, {"person1": person1, "person2": person2}, matched)
 
@@ -1126,7 +1150,7 @@ def generate_planetary_return(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(return_data),
+        "text": context_text(return_data),
     }
     report_polar_fallback(result, house_system, {"return": return_subject})
     
@@ -1232,7 +1256,7 @@ def generate_event_chart(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
-        "text": to_context(chart_data),
+        "text": context_text(chart_data),
     }
     report_polar_fallback(result, house_system, {"event": event_subject})
     
@@ -1317,7 +1341,7 @@ def get_current_positions(
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, language=language
         ),
-        "text": to_context(now),
+        "text": context_text(now),
     }
     report_polar_fallback(result, house_system, {"now": now})
     
