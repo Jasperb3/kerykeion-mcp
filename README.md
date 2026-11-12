@@ -83,10 +83,10 @@ uv run pytest -q
 | Test file | Guards |
 |---|---|
 | `test_astrological_correctness.py` | Golden-value regression checks against the live Kerykeion/Swiss Ephemeris install (e.g. known Sun sign for a fixed birth) |
-| `test_contracts.py` | Response shape -- `status`, `applied_settings`, error format |
-| `test_polar.py` | Polar latitudes: true latitude kept, cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool, pole charts are refused, a backwards polar Ascendant is flagged retrograde |
+| `test_contracts.py` | Response shape -- `status`, `applied_settings`, error format, `exclude_derived_points` |
+| `test_polar.py` | Polar latitudes: true latitude kept, cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool, pole charts are refused, the angles carry no motion or speed in any output |
 | `test_composite.py` | Composite houses hang from the Ascendant (immanuel's construction) over a London/Svalbard grid: cusp midpoints, Asc on cusp 1, MC on cusp 10, planet houses |
-| `test_startup.py` | `main()` loads kerykeion's lazy native imports before serving stdio (the Windows first-call stall) |
+| `test_startup.py` | `main()` loads kerykeion's lazy native imports before serving stdio (the Windows first-call stall), logs each start-up phase, exits with one line when the ephemeris files are missing |
 | `test_engine.py` | The Swiss Ephemeris backend with its data files (not libephemeris, not Moshier); planets match the immanuel engine |
 | `test_patterns.py` | Pattern-detection logic in `patterns.py` (stelliums, T-squares, yods, etc.) against synthetic aspect fixtures |
 | `test_security.py` | Output-path confinement, PII-in-logs, loopback-only HTTP bind |
@@ -130,6 +130,44 @@ Or install directly:
 ```bash
 uv run mcp install src/kerykeion_mcp/server.py --name "Kerykeion Charts"
 ```
+
+### Windows troubleshooting
+
+**Logs.** The server logs to stderr, which Claude Desktop is documented to write to `%APPDATA%\Claude\logs\mcp-server-kerykeion-charts.log`. It never writes to stdout, which carries the protocol. A healthy start looks like this:
+
+```
+INFO:kerykeion_mcp.server:Starting Kerykeion MCP Server v0.3.2 (imports and engine check took 2.04s)
+INFO:kerykeion_mcp.server:Ephemeris: swisseph, data files in C:\Users\<you>\.kerykeion\sweph
+INFO:kerykeion_mcp.server:PNG conversion available: True
+INFO:kerykeion_mcp.server:Warm-up done in 0.38s
+INFO:kerykeion_mcp.server:Ready after 2.46s: serving stdio (use --http for HTTP mode)
+```
+
+With the ephemeris files missing (`sepl_18.se1`, `semo_18.se1` and `seas_18.se1` in `%USERPROFILE%\.kerykeion\sweph`, or in `KERYKEION_EPHE_PATH`), it stops with exit code 1 and one line, `ERROR:...:Cannot start: Swiss Ephemeris data files missing (...) in <path>; ...`, which names the fix.
+
+If that log has nothing recent, check its date before concluding the server didn't start. On one install, every `mcp-server-*.log` (for all servers) and `main.log` stopped updating on the same day while the servers kept running.
+
+**See it start for yourself.** `scripts/startup_probe.py` launches the server the way Claude Desktop does, sends `initialize` and `tools/list`, and prints the time to each reply with the server's stderr:
+
+```
+python scripts\startup_probe.py                     # Desktop's uv command
+python scripts\startup_probe.py --cwd C:\ --call     # from another directory, plus one tool call
+python scripts\startup_probe.py -- .venv\Scripts\python.exe -m kerykeion_mcp.server
+```
+
+On a Windows 11 desktop, `initialize` answers in about 2.3–2.6 s warm. After a reboot or an update it can take 9 s (the `.pyc` files recompiled) to 28 s (the disk cache cold as well). `uv run` itself adds about 0.1 s.
+
+**Skipping uv at launch.** `uv run` checks the environment on every launch and re-syncs it after a `git pull` that changes `uv.lock` or the version. Claude Desktop may run more than one copy of the server, and a re-sync while another copy holds the venv's DLLs open can fail. To rule that out, point Desktop at the venv's Python and run `uv sync` yourself, with Claude Desktop quit, after each update:
+
+```json
+"kerykeion-charts": {
+  "command": "C:\\path\\to\\kerykeion-mcp\\.venv\\Scripts\\python.exe",
+  "args": ["-m", "kerykeion_mcp.server"],
+  "env": {"KERYKEION_EPHE_PATH": "C:\\Users\\<you>\\.kerykeion\\sweph"}
+}
+```
+
+`env` is optional (the server finds `%USERPROFILE%\.kerykeion\sweph` by itself). Give `KERYKEION_EPHE_PATH` and `KERYKEION_OUTPUT_BASE` as absolute paths. Claude Desktop chooses the working directory, so a relative path would resolve somewhere unexpected.
 
 ### ChatGPT Desktop Configuration
 
@@ -182,6 +220,7 @@ Most chart tools accept:
 - **output_dir**: Custom directory to save chart images (optional; must resolve under `~/.kerykeion_charts` or `KERYKEION_OUTPUT_BASE`; defaults to `KERYKEION_OUTPUT_BASE` if set, else `~/.kerykeion_charts`)
 - **city** / **nation**: labels only. Whatever is left blank is filled with coordinates ("Rome, 41.90N 12.50E", or just "41.90N, 12.50E"), never with kerykeion's default "Greenwich, GB".
 - **chart_style**: "full" (default), "wheel_only", or "aspect_grid"
+- **exclude_derived_points**: `false` (default) or `true`, on every tool that lists aspects. `true` drops aspects to the Descendant, IC and South Node, which mirror aspects to the Ascendant, MC and North Node (a trine to one end of an axis is a sextile to the other), and aspects between two angles. A single chart already leaves out its own Asc–Desc, MC–IC and node pairs. Across two charts every contact appears to both ends of each axis, so the London × McMurdo synastry in the tests goes from 116 aspects to 76. The one loss is a quintile to a derived point: its mirror is a 108° aspect, which the server doesn't compute. The response echoes `applied_settings.exclude_derived_points: true`.
 
 `generate_planetary_return` additionally accepts `return_month`/`return_day` (defaults to today, so lunar returns aren't stuck searching from January), `return_lat`/`return_lng`/`return_tz_str` to cast the return chart for the person's current location instead of their birth location, and `return_city`/`return_nation` to label that location (relocated returns default to a coordinate label). Sidereal return charts are rejected with an explanatory error — see Roadmap.
 

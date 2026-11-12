@@ -6,6 +6,11 @@ capabilities using the Kerykeion library. Works with Claude Desktop and
 ChatGPT Desktop via standard MCP transport.
 """
 
+import time
+
+# Start-up timings in the log are measured from here, before the heavy imports.
+_STARTED = time.perf_counter()
+
 import functools
 import logging
 import re
@@ -56,8 +61,14 @@ from .validation import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Refuse to run on anything but the Swiss Ephemeris with its data files.
-engine.check()
+# Refuse to run on anything but the Swiss Ephemeris with its data files: one
+# readable line on stderr (what an MCP client's log shows), not a traceback.
+try:
+    engine.check()
+except RuntimeError as e:
+    logger.error(f"Cannot start: {e}")
+    raise SystemExit(1)
+_IMPORTED = time.perf_counter()
 
 # kerykeion 6 narrowed its defaults to 14 points (no Lilith, South Node,
 # Descendant or IC), five aspects at 5-6 degree orbs (no quintile) and +1.5
@@ -79,30 +90,30 @@ ASPECT_SETTINGS = dict(
 
 
 ANGLES = ("ascendant", "descendant", "medium_coeli", "imum_coeli")
-# Below this an angle's speed is floating-point noise, not motion.
-ANGLE_SPEED_EPSILON = 1e-6
 
 
 def fix_axis_motion(subject):
     """
-    Flag an angle retrograde when it moves backwards through the zodiac.
+    Give the angles no motion flag.
 
-    kerykeion takes the angles' speeds from the Swiss Ephemeris (houses_ex2)
-    but hard-codes them as direct. Outside the polar circles the angles always
-    move forwards; inside them the Ascendant (and so the Descendant) runs
-    backwards for part of the day, at the speed reported -- it matches a
-    finite difference of the Ascendant itself. The speed is kept as it is and
-    the flag made to agree with it.
+    The angles turn with the sky (about 360 degrees a day) rather than move as
+    planets do, so "direct" or "retrograde" on them reads as planetary motion
+    that isn't there -- and inside the polar circles, where the Ascendant runs
+    backwards for part of the day, kerykeion's speed would make it read as
+    retrograde. The flag is cleared (no motion attribute in the text, no
+    retrograde glyph on the wheel); the speed stays in the model because
+    kerykeion times applying/separating aspects to an angle from it, and
+    context_text drops it from the text.
     """
     for name in ANGLES:
         angle = getattr(subject, name, None)
-        if angle is not None and angle.speed is not None:
-            angle.retrograde = angle.speed < -ANGLE_SPEED_EPSILON
+        if angle is not None:
+            angle.retrograde = None
     return subject
 
 
 class SubjectFactory(AstrologicalSubjectFactory):
-    """AstrologicalSubjectFactory whose subjects' angles carry a truthful motion flag."""
+    """AstrologicalSubjectFactory whose subjects' angles carry no motion flag."""
 
     @classmethod
     def from_birth_data(cls, *args, **kwargs):
@@ -159,6 +170,29 @@ def handle_chart_errors(func):
             }
 
     return wrapper
+
+
+# Points that sit exactly opposite another (their aspects mirror that point's)
+# and the angles, whose aspects to each other are fixed by the house frame.
+DERIVED_POINTS = frozenset({"Descendant", "Imum_Coeli", "True_South_Lunar_Node", "Mean_South_Lunar_Node"})
+AXIS_POINTS = frozenset({"Ascendant", "Descendant", "Medium_Coeli", "Imum_Coeli"})
+
+
+def drop_derived_aspects(aspects):
+    """
+    The aspects without the ones that repeat others (exclude_derived_points).
+
+    An aspect to the Descendant, IC or South Node is the mirror of one to the
+    Ascendant, MC or North Node (a trine to one end is a sextile to the other),
+    and an aspect between two angles follows from the house frame. kerykeion
+    already skips a chart's own opposite pairs (Asc-Desc, MC-IC, the nodes);
+    across two charts it keeps them all. The one loss: a quintile to a derived
+    point mirrors a 108-degree aspect this server doesn't compute.
+    """
+    return [
+        a for a in aspects
+        if not ({a.p1_name, a.p2_name} & DERIVED_POINTS or {a.p1_name, a.p2_name} <= AXIS_POINTS)
+    ]
 
 
 def build_applied_settings(
@@ -301,6 +335,11 @@ _FILLED_CITY = re.compile(rf'(<(?:birth|transit)_data [^>]*?)city="(?:{_LAT}, {_
 _FILLED_NATION = re.compile(rf'(<(?:birth|transit)_data [^>]*?)nation="(?:{_LAT} {_LNG}|{_LNG})"')
 
 
+# The four angles' <point> elements: their motion and speed are dropped.
+_ANGLE_POINT = re.compile(r'<point name="(?:Ascendant|Descendant|Medium_Coeli|Imum_Coeli)" [^>]*>')
+_MOTION_ATTRS = re.compile(r' (?:motion|speed)="[^"]*"')
+
+
 def context_text(chart, chart_type: Optional[str] = None, data_tag: Optional[str] = None) -> str:
     """
     kerykeion's to_context text for `chart`, with the structured place fields
@@ -311,6 +350,9 @@ def context_text(chart, chart_type: Optional[str] = None, data_tag: Optional[str
     the city and nation fields ("78.22N", "15.63E"). They are emptied there --
     the element's lat/lng attributes already carry the coordinates.
 
+    The angles' motion and speed are dropped from every chart (returns
+    included, whose subjects kerykeion builds itself): see fix_axis_motion.
+
     `chart_type` names a single-wheel chart that kerykeion can only build as
     natal chart data (returns, events): it replaces the type of the
     <chart_analysis> element, and nothing else. `data_tag` renames the
@@ -319,6 +361,7 @@ def context_text(chart, chart_type: Optional[str] = None, data_tag: Optional[str
     text = to_context(chart)
     text = _FILLED_CITY.sub(r'\1city=""', text)
     text = _FILLED_NATION.sub(r'\1nation=""', text)
+    text = _ANGLE_POINT.sub(lambda m: _MOTION_ATTRS.sub("", m.group(0)), text)
     if chart_type:
         text = text.replace('<chart_analysis type="Natal">', f'<chart_analysis type="{chart_type}">', 1)
     if data_tag:
@@ -364,6 +407,13 @@ it lands in), so with one polar person house_system reads "mixed: ..." and
 names each person's system; a composite has one set of houses, so both
 people are cast with Porphyry. Exactly at a pole (latitude +/-90) there is
 no horizon: timed charts are refused with type "PoleError".
+
+The angles (Ascendant, Descendant, MC, IC) carry no motion or speed: they
+turn with the sky, so "retrograde" does not apply to them. Every tool that
+lists aspects takes exclude_derived_points=True for a shorter list without the
+mirrored aspects to the Descendant, IC and South Node and without
+angle-to-angle aspects; without it, a synastry lists each contact up to
+four times (to both ends of an axis in each chart).
 
 Common timezones: UTC, Europe/London, Europe/Paris, Europe/Rome,
 America/New_York, America/Los_Angeles, Asia/Tokyo, Australia/Sydney
@@ -460,6 +510,7 @@ def generate_natal_chart(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
     chart_style: ChartStyle = "full",
@@ -484,6 +535,9 @@ def generate_natal_chart(
         house_system: House system - "P" (Placidus), "W" (Whole Sign), "K" (Koch), etc.
         zodiac_type: "Tropical" (Western) or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
         sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal" (e.g. "LAHIRI")
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
         output_format: "text" (text only), "images" (text + save images), or "all"
         output_dir: Directory to save chart images (optional)
         chart_style: "full" (complete chart), "wheel_only" (just the wheel), "aspect_grid" (just aspects table)
@@ -524,6 +578,9 @@ def generate_natal_chart(
     chart_data = ChartDataFactory.create_natal_chart_data(subject, **ASPECT_SETTINGS)
 
     # Build response
+    if exclude_derived_points:
+        chart_data.aspects = drop_derived_aspects(chart_data.aspects)
+
     result = {
         "status": "success",
         "chart_type": "Natal",
@@ -534,6 +591,8 @@ def generate_natal_chart(
         ),
         "text": context_text(chart_data),
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"natal": subject})
 
     # Generate and save images if requested
@@ -575,6 +634,7 @@ def generate_synastry_chart(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
     include_relationship_score: bool = True,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
@@ -611,6 +671,9 @@ def generate_synastry_chart(
         house_system: House system identifier
         zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
         sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
         include_relationship_score: Include compatibility score calculation
         output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
@@ -671,6 +734,9 @@ def generate_synastry_chart(
         **ASPECT_SETTINGS,
     )
 
+    if exclude_derived_points:
+        synastry_data.aspects = drop_derived_aspects(synastry_data.aspects)
+
     result = {
         "status": "success",
         "chart_type": "Synastry",
@@ -680,6 +746,8 @@ def generate_synastry_chart(
         ),
         "text": context_text(synastry_data),
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"person1": person1, "person2": person2})
     
     # Add relationship score if available
@@ -739,6 +807,7 @@ def generate_transit_chart(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
     chart_style: ChartStyle = "full",
@@ -767,6 +836,9 @@ def generate_transit_chart(
         house_system: House system identifier -- applied to both the natal and transit subjects
         zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
         sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
         output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         chart_style: "full", "wheel_only", or "aspect_grid"
@@ -840,6 +912,9 @@ def generate_transit_chart(
         **ASPECT_SETTINGS,
     )
 
+    if exclude_derived_points:
+        transit_data.aspects = drop_derived_aspects(transit_data.aspects)
+
     result = {
         "status": "success",
         "chart_type": "Transit",
@@ -852,6 +927,8 @@ def generate_transit_chart(
         ),
         "text": context_text(transit_data),
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"natal": natal, "transit": transit})
     
     # Generate and save images if requested
@@ -892,6 +969,7 @@ def generate_composite_chart(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
     chart_style: ChartStyle = "full",
@@ -923,6 +1001,9 @@ def generate_composite_chart(
         house_system: House system identifier
         zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
         sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
         output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         chart_style: "full", "wheel_only", or "aspect_grid"
@@ -994,6 +1075,9 @@ def generate_composite_chart(
     # Create composite chart data
     composite_data = ChartDataFactory.create_composite_chart_data(composite, **ASPECT_SETTINGS)
     
+    if exclude_derived_points:
+        composite_data.aspects = drop_derived_aspects(composite_data.aspects)
+
     result = {
         "status": "success",
         "chart_type": "Composite",
@@ -1003,6 +1087,8 @@ def generate_composite_chart(
         ),
         "text": context_text(composite_data),
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"person1": person1, "person2": person2}, matched)
 
     # Generate and save images if requested
@@ -1046,6 +1132,7 @@ def generate_planetary_return(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
     chart_style: ChartStyle = "full",
@@ -1085,6 +1172,9 @@ def generate_planetary_return(
         zodiac_type: "Tropical" only. Sidereal return charts are rejected with an
             explanatory error -- the underlying return search is not sidereal-aware.
         sidereal_mode: Not supported for returns (see zodiac_type)
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
         output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         chart_style: "full", "wheel_only", or "aspect_grid"
@@ -1205,6 +1295,9 @@ def generate_planetary_return(
     )
     return_data = ChartDataFactory.create_natal_chart_data(return_subject, **ASPECT_SETTINGS)
 
+    if exclude_derived_points:
+        return_data.aspects = drop_derived_aspects(return_data.aspects)
+
     result = {
         "status": "success",
         "chart_type": f"{return_type} Return",
@@ -1216,6 +1309,8 @@ def generate_planetary_return(
         ),
         "text": context_text(return_data, chart_type=f"{return_type} Return"),
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"return": return_subject})
     
     # Generate and save images if requested
@@ -1251,6 +1346,7 @@ def generate_event_chart(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
     output_format: OutputFormat = "all",
     output_dir: Optional[str] = None,
     chart_style: ChartStyle = "full",
@@ -1276,6 +1372,9 @@ def generate_event_chart(
         house_system: House system identifier
         zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
         sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
         output_format: "text", "images", or "all"
         output_dir: Directory to save chart images (optional)
         chart_style: "full", "wheel_only", or "aspect_grid"
@@ -1313,6 +1412,9 @@ def generate_event_chart(
 
     chart_data = ChartDataFactory.create_natal_chart_data(event_subject, **ASPECT_SETTINGS)
 
+    if exclude_derived_points:
+        chart_data.aspects = drop_derived_aspects(chart_data.aspects)
+
     result = {
         "status": "success",
         "chart_type": "Event",
@@ -1322,6 +1424,8 @@ def generate_event_chart(
         ),
         "text": context_text(chart_data, chart_type="Event"),
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"event": event_subject})
     
     # Generate and save images if requested
@@ -1435,6 +1539,7 @@ def get_aspects(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
 ) -> dict:
     """
     Get detailed aspect list for a single chart without generating images.
@@ -1451,6 +1556,9 @@ def get_aspects(
         house_system: House system identifier
         zodiac_type: "Tropical" or "Sidereal"
         sidereal_mode: Required if zodiac_type is "Sidereal" (e.g., "LAHIRI")
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
         
     Returns:
         dict: Contains:
@@ -1480,6 +1588,8 @@ def get_aspects(
     )
     
     aspect_result = AspectsFactory.single_chart_aspects(subject, **ASPECT_SETTINGS)
+    if exclude_derived_points:
+        aspect_result.aspects = drop_derived_aspects(aspect_result.aspects)
     
     # Format aspects for AI consumption
     aspects_list = []
@@ -1500,6 +1610,8 @@ def get_aspects(
         "aspect_count": len(aspects_list),
         "aspects": aspects_list,
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"subject": subject})
     
     logger.info(f"Found {len(aspects_list)} aspects")
@@ -1520,6 +1632,7 @@ def get_synastry_aspects(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
 ) -> dict:
     """
     Get aspects between two charts (synastry aspects) without generating images.
@@ -1541,6 +1654,9 @@ def get_synastry_aspects(
         house_system: House system identifier
         zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
         sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
 
     Returns:
         dict: Contains:
@@ -1583,6 +1699,8 @@ def get_synastry_aspects(
     )
     
     aspect_result = AspectsFactory.dual_chart_aspects(person1, person2, **ASPECT_SETTINGS)
+    if exclude_derived_points:
+        aspect_result.aspects = drop_derived_aspects(aspect_result.aspects)
     
     # Format aspects for AI consumption
     aspects_list = []
@@ -1603,6 +1721,8 @@ def get_synastry_aspects(
         "aspect_count": len(aspects_list),
         "aspects": aspects_list,
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"person1": person1, "person2": person2})
     
     logger.info(f"Found {len(aspects_list)} synastry aspects")
@@ -1624,6 +1744,7 @@ def get_chart_patterns(
     house_system: str = "P",
     zodiac_type: str = "Tropical",
     sidereal_mode: Optional[str] = None,
+    exclude_derived_points: bool = False,
 ) -> dict:
     """
     Detect chart patterns (stelliums, T-squares, grand trines, grand crosses,
@@ -1644,6 +1765,9 @@ def get_chart_patterns(
         house_system: House system identifier
         zodiac_type: "Tropical" or "Sidereal" (requires sidereal_mode, e.g. 'LAHIRI' for Vedic)
         sidereal_mode: Ayanamsha, required if zodiac_type is "Sidereal"
+        exclude_derived_points: Drop aspects that repeat others: any aspect to the
+            Descendant, IC or South Node (each mirrors one to the Ascendant, MC or
+            North Node) and any aspect between two angles. Default False.
 
     Returns:
         dict: Contains:
@@ -1673,6 +1797,8 @@ def get_chart_patterns(
     )
 
     aspect_result = AspectsFactory.single_chart_aspects(subject, **ASPECT_SETTINGS)
+    if exclude_derived_points:
+        aspect_result.aspects = drop_derived_aspects(aspect_result.aspects)
     aspects = [
         {"p1": a.p1_name, "p2": a.p2_name, "type": a.aspect}
         for a in aspect_result.aspects
@@ -1699,6 +1825,8 @@ def get_chart_patterns(
         "element_balance": element_balance(planets),
         "mode_balance": mode_balance(planets),
     }
+    if exclude_derived_points:
+        result["applied_settings"]["exclude_derived_points"] = True
     report_polar_fallback(result, house_system, {"subject": subject})
 
     logger.info(f"Found {len(patterns)} patterns")
@@ -1738,9 +1866,18 @@ def main():
     parser.add_argument("--port", type=int, default=8000, help="Port to bind HTTP transports to (default: 8000)")
     args = parser.parse_args()
 
-    logger.info("Starting Kerykeion MCP Server")
+    from kerykeion.ephemeris_backend.backend import EPHE_DATA_PATH
+
+    from . import __version__
+
+    logger.info(
+        f"Starting Kerykeion MCP Server v{__version__} "
+        f"(imports and engine check took {_IMPORTED - _STARTED:.2f}s)")
+    logger.info(f"Ephemeris: {engine.BACKEND}, data files in {EPHE_DATA_PATH}")
     logger.info(f"PNG conversion available: {HAS_CAIROSVG}")
+    warm_start = time.perf_counter()
     warm_up()
+    logger.info(f"Warm-up done in {time.perf_counter() - warm_start:.2f}s")
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(
@@ -1763,7 +1900,7 @@ def main():
         uvicorn.run(mcp.streamable_http_app(), host=args.host, port=args.port)
     else:
         # Default: stdio transport for Claude Desktop
-        logger.info("Running with stdio transport (use --http for HTTP mode)")
+        logger.info(f"Ready after {time.perf_counter() - _STARTED:.2f}s: serving stdio (use --http for HTTP mode)")
         mcp.run(transport="stdio")
 
 
