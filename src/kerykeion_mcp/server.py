@@ -187,12 +187,26 @@ def report_polar_fallback(
         return
     settings = result["applied_settings"]
     settings["house_system"] = _house_system_label(house_system, True)
+    warnings = [POLAR_WARNING.format(name=VALID_HOUSE_SYSTEMS[house_system])]
     if len(subjects) > 1:
         by_subject = {label: _house_system_label(house_system, label in fallen) for label in subjects}
         if matched:
             by_subject[matched[0]] = f"{PORPHYRY} ({VALID_HOUSE_SYSTEMS[PORPHYRY]}, to match {matched[1]})"
         settings["house_system_by_subject"] = by_subject
-    warnings = [POLAR_WARNING.format(name=VALID_HOUSE_SYSTEMS[house_system])]
+        if len(set(by_subject.values())) > 1 and not matched:
+            # Synastry and transits keep each chart's own houses (each overlay
+            # reads the houses of the chart it lands in), so the two systems
+            # really differ. A composite has one set of houses and is
+            # `matched` instead.
+            settings["house_system"] = "mixed: " + "; ".join(
+                f"{label} {system}" for label, system in by_subject.items())
+            for label in fallen:
+                kept = "; ".join(f"{other}'s are {system}" for other, system in by_subject.items()
+                                 if other not in fallen)
+                warnings.append(
+                    f"{label}'s houses are {by_subject[label]}, while {kept}. Each chart keeps "
+                    "its own houses, so a house overlay uses the houses of the chart it lands in."
+                )
     if matched:
         warnings.append(
             f"A composite needs one house system for both people, so {matched[0]} "
@@ -255,7 +269,12 @@ polar circles (beyond about 66.56 deg N/S) Placidus and Koch houses do not
 exist, so those charts use Porphyry cusps instead: applied_settings.house_system
 then reads e.g. "O (Porphyry, polar fallback from P Placidus)" and a warning
 says so. Tell the user which house system was actually used. Every other
-house system is cast as asked at the true latitude.
+house system is cast as asked at the true latitude. Synastry and transit
+charts keep each chart's own houses (an overlay uses the houses of the chart
+it lands in), so with one polar person house_system reads "mixed: ..." and
+names each person's system; a composite has one set of houses, so both
+people are cast with Porphyry. Exactly at a pole (latitude +/-90) there is
+no horizon: timed charts are refused with type "PoleError".
 
 Common timezones: UTC, Europe/London, Europe/Paris, Europe/Rome,
 America/New_York, America/Los_Angeles, Asia/Tokyo, Australia/Sydney
@@ -474,6 +493,13 @@ def generate_synastry_chart(
 ) -> dict:
     """
     Generate a synastry chart comparing two people for compatibility analysis.
+
+    Each person keeps their own houses, because each house overlay places one
+    person's planets in the other's houses. If one person was born inside a
+    polar circle (Placidus/Koch fall back to Porphyry there), the two charts'
+    house systems differ: applied_settings.house_system reads "mixed: ..." and
+    names each person's system. (A composite, with one set of houses, casts
+    both people with Porphyry instead.)
 
     Response contains 'svg_path'/'png_path' (local file paths) when
     output_format includes images -- read the SVG file directly to embed it.

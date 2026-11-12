@@ -266,17 +266,38 @@ def test_current_positions_report_the_fallback():
     assert_fallback_reported(get_current_positions(lat=69.65, lng=18.95, tz_str="Europe/Oslo"))
 
 
+def assert_mixed_reported(result, fallen, kept, kept_system="P (Placidus)"):
+    """One subject fell back and the other kept the requested system."""
+    assert result["status"] == "success", result
+    settings = result["applied_settings"]
+    assert settings["house_system_by_subject"] == {fallen: PLACIDUS_FALLBACK, kept: kept_system}
+    assert settings["house_system"] == "mixed: " + "; ".join(
+        f"{label} {system}" for label, system in settings["house_system_by_subject"].items())
+    assert PLACIDUS_WARNING in result["warnings"]
+    assert any(w.startswith(f"{fallen}'s houses are {PLACIDUS_FALLBACK}") and f"{kept}'s are {kept_system}" in w
+               for w in result["warnings"]), result["warnings"]
+
+
 def test_synastry_with_one_polar_subject_reports_per_subject():
     result = generate_synastry_chart(**pair(TROMSO, LONDON), output_format="text")
-    assert_fallback_reported(result)
-    assert result["applied_settings"]["house_system_by_subject"] == {
-        "person1": PLACIDUS_FALLBACK, "person2": "P (Placidus)",
-    }
+    assert_mixed_reported(result, "person1", "person2")
+    assert result["applied_settings"]["house_system"] == (
+        "mixed: person1 O (Porphyry, polar fallback from P Placidus); person2 P (Placidus)")
     aspects = get_synastry_aspects(**pair(LONDON, TROMSO))
-    assert_fallback_reported(aspects)
-    assert aspects["applied_settings"]["house_system_by_subject"] == {
-        "person1": "P (Placidus)", "person2": PLACIDUS_FALLBACK,
-    }
+    assert_mixed_reported(aspects, "person2", "person1")
+
+
+def test_synastry_mixed_warning_leads_the_text():
+    result = generate_synastry_chart(**pair(LONDON, POLAR_PLACES["McMurdo"]), output_format="text")
+    assert_mixed_reported(result, "person2", "person1")
+    for warning in result["warnings"]:
+        assert f"Warning: {warning}" in result["text"].split("<", 1)[0]
+
+
+def test_synastry_with_two_polar_subjects_is_not_mixed():
+    result = generate_synastry_chart(**pair(TROMSO, POLAR_PLACES["McMurdo"]), output_format="text")
+    assert_fallback_reported(result)
+    assert result["warnings"] == [PLACIDUS_WARNING]
 
 
 def test_composite_with_one_polar_subject_casts_both_with_porphyry():
@@ -311,10 +332,7 @@ def test_transit_with_polar_natal_place():
         **natal_args(TROMSO), transit_lat=51.5, transit_lng=0.0, transit_tz_str="Europe/London",
         **TRANSIT_TIME, output_format="text",
     )
-    assert_fallback_reported(result)
-    assert result["applied_settings"]["house_system_by_subject"] == {
-        "natal": PLACIDUS_FALLBACK, "transit": "P (Placidus)",
-    }
+    assert_mixed_reported(result, "natal", "transit")
 
 
 def test_transit_with_polar_transit_place():
@@ -322,10 +340,7 @@ def test_transit_with_polar_transit_place():
         **natal_args(LONDON), transit_lat=69.65, transit_lng=18.95, transit_tz_str="Europe/Oslo",
         **TRANSIT_TIME, output_format="text",
     )
-    assert_fallback_reported(result)
-    assert result["applied_settings"]["house_system_by_subject"] == {
-        "natal": "P (Placidus)", "transit": PLACIDUS_FALLBACK,
-    }
+    assert_mixed_reported(result, "transit", "natal")
 
 
 RETURN_DATE = dict(return_year=2026, return_month=1, return_day=1)
