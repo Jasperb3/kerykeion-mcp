@@ -26,6 +26,9 @@ PNG_OUTPUT_WIDTH = 1600
 # Prevents infinite loops when CSS variables reference each other.
 CSS_VAR_RESOLVE_MAX_DEPTH = 10
 CSS_VAR_FALLBACK_COLOR = "#000000"
+# var(--name) or var(--name, fallback); a fallback holding its own var() is
+# resolved innermost-first by the repeated passes below.
+CSS_VAR_PATTERN = re.compile(r'var\(--([\w-]+)(?:\s*,\s*([^()]*?))?\s*\)')
 
 
 def resolve_css_variables(svg_string: str) -> str:
@@ -33,7 +36,8 @@ def resolve_css_variables(svg_string: str) -> str:
     Resolve CSS custom properties (variables) in SVG for CairoSVG compatibility.
     
     CairoSVG doesn't support CSS variables, so we need to inline the values.
-    Handles nested variable references (e.g., --foo: var(--bar)).
+    Handles nested variable references (e.g., --foo: var(--bar)) and fallback
+    values (var(--foo, 0.5) -- used when --foo is undefined).
     
     Args:
         svg_string: SVG content with CSS variables
@@ -49,17 +53,19 @@ def resolve_css_variables(svg_string: str) -> str:
     if not var_defs:
         return svg_string
     
+    def resolve(match):
+        name, fallback = match.group(1), match.group(2)
+        if name in var_defs:
+            return var_defs[name]
+        return fallback.strip() if fallback is not None else CSS_VAR_FALLBACK_COLOR
+
     # First, resolve nested variable references in the definitions themselves
     # Some variables reference other variables, e.g., --foo: var(--bar)
     for _ in range(CSS_VAR_RESOLVE_MAX_DEPTH):
         updated = False
         for var_name, var_value in var_defs.items():
             if 'var(--' in var_value:
-                # Replace var(--xxx) with the actual value
-                def resolve_nested(match):
-                    ref_name = match.group(1)
-                    return var_defs.get(ref_name, CSS_VAR_FALLBACK_COLOR)
-                new_value = re.sub(r'var\(--([\w-]+)\)', resolve_nested, var_value)
+                new_value = CSS_VAR_PATTERN.sub(resolve, var_value)
                 if new_value != var_value:
                     var_defs[var_name] = new_value
                     updated = True
@@ -67,14 +73,10 @@ def resolve_css_variables(svg_string: str) -> str:
             break
 
     # Now replace var(--name) with actual values in the SVG
-    def replace_var(match):
-        var_name = match.group(1)
-        return var_defs.get(var_name, CSS_VAR_FALLBACK_COLOR)
-    
     # Multiple passes to catch any remaining nested references
     resolved = svg_string
     for _ in range(3):
-        new_resolved = re.sub(r'var\(--([\w-]+)\)', replace_var, resolved)
+        new_resolved = CSS_VAR_PATTERN.sub(resolve, resolved)
         if new_resolved == resolved:
             break
         resolved = new_resolved
