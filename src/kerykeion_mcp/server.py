@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional, Literal
 
 import pytz
+import swisseph as swe
 from mcp.server.fastmcp import FastMCP
 from kerykeion import (
     AstrologicalSubjectFactory,
@@ -70,6 +71,18 @@ def handle_chart_errors(func):
             return {"status": "error", "error": f"Unknown timezone: {e}", "hint": ""}
         except KerykeionException as e:
             return {"status": "error", "error": str(e), "hint": ""}
+        except swe.Error as e:
+            # Polar-circle house errors are handled by build_subject; anything
+            # else from the Swiss Ephemeris is about this chart's input.
+            return {
+                "status": "error",
+                "error": f"The Swiss Ephemeris could not calculate this chart: {e}",
+                "hint": (
+                    "Check the date and coordinates. Dates far outside 1800-2400 "
+                    "may lie beyond the bundled ephemeris files; if the message "
+                    "mentions houses, try house_system=\"W\"."
+                ),
+            }
         except ValueError as e:
             return {"status": "error", "error": str(e), "hint": ""}
         except Exception as e:

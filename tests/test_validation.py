@@ -7,9 +7,12 @@ educational {"status": "error", ...} response rather than silently
 substituted or left to raise a raw traceback.
 """
 
+import swisseph as swe
+
 from kerykeion_mcp.server import (
     generate_natal_chart,
     get_aspects,
+    handle_chart_errors,
 )
 
 
@@ -84,3 +87,14 @@ def test_sidereal_with_lahiri_applies(birth_rome):
     result = get_aspects(**birth_rome, zodiac_type="Sidereal", sidereal_mode="LAHIRI")
     assert result["status"] == "success"
     assert result["applied_settings"]["sidereal_mode"] == "LAHIRI"
+
+
+def test_swiss_ephemeris_errors_become_structured_errors():
+    @handle_chart_errors
+    def tool():
+        raise swe.Error("swisseph.calc_ut: ephemeris file not found")
+    result = tool()
+    assert result["status"] == "error"
+    assert "ephemeris file not found" in result["error"]
+    assert "Internal error" not in result["error"]
+    assert result["hint"]
