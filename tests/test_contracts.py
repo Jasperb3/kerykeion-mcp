@@ -81,6 +81,35 @@ def test_transit_chart_contract(birth_rome):
     assert "text" in result
 
 
+def transit_at(birth_rome, **when):
+    return generate_transit_chart(
+        natal_name=birth_rome["name"], natal_year=birth_rome["year"],
+        natal_month=birth_rome["month"], natal_day=birth_rome["day"],
+        natal_hour=birth_rome["hour"], natal_minute=birth_rome["minute"],
+        natal_lat=birth_rome["lat"], natal_lng=birth_rome["lng"], natal_tz_str=birth_rome["tz_str"],
+        transit_lat=birth_rome["lat"], transit_lng=birth_rome["lng"], transit_tz_str=birth_rome["tz_str"],
+        output_format="text", **when,
+    )
+
+
+def test_transit_time_echoes_an_explicit_transit_moment(birth_rome):
+    result = transit_at(birth_rome, transit_year=2020, transit_month=1, transit_day=1,
+                        transit_hour=12, transit_minute=0)
+    assert result["transit_time"] == "2020-01-01T12:00:00+01:00"
+
+
+def test_transit_time_and_timestamp_are_iso_for_now(birth_rome):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    stamps = [
+        transit_at(birth_rome)["transit_time"],
+        get_current_positions(lat=birth_rome["lat"], lng=birth_rome["lng"],
+                              tz_str=birth_rome["tz_str"])["timestamp"],
+    ]
+    for stamp in stamps:
+        assert abs(datetime.fromisoformat(stamp) - now) < timedelta(minutes=2), stamp
+
+
 def test_composite_chart_contract(birth_rome, birth_london):
     result = generate_composite_chart(
         name1=birth_rome["name"], year1=birth_rome["year"], month1=birth_rome["month"],

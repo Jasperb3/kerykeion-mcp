@@ -729,7 +729,9 @@ def generate_transit_chart(
         "status": "success",
         "chart_type": "Transit",
         "natal_subject": natal_name,
-        "transit_time": str(transit.utc_time) if hasattr(transit, 'utc_time') else "current",
+        # The moment actually cast, in the transit zone (kerykeion 6 has no
+        # utc_time, so this used to read "current" even for explicit dates).
+        "transit_time": transit.iso_formatted_local_datetime,
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, theme=theme, language=language, chart_style=chart_style
         ),
@@ -1285,7 +1287,7 @@ def get_current_positions(
     result = {
         "status": "success",
         "chart_type": "Current Positions",
-        "timestamp": str(now.utc_time) if hasattr(now, 'utc_time') else "current",
+        "timestamp": now.iso_formatted_local_datetime,
         "applied_settings": build_applied_settings(
             house_system, zodiac_type, sidereal_mode, language=language
         ),
