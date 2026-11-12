@@ -184,6 +184,23 @@ def build_applied_settings(
     return settings
 
 
+
+def composite_subject(person1, person2):
+    """
+    The midpoint composite of two subjects, its houses hung from the Ascendant.
+
+    Every composite cusp is a midpoint of the two cusps of its number; which of
+    the two midpoints (near or far) is decided by the angle held. kerykeion's
+    default ("auto") holds whichever angle pair sits closer, so for some pairs
+    it holds the Midheaven and the ring -- Ascendant included -- comes out half
+    a circle from the immanuel server's, which always holds the Ascendant
+    (cusp n = Asc midpoint + mean of each chart's (cusp n - Asc) mod 360).
+    Holding the Ascendant here makes the two engines agree.
+    """
+    return CompositeSubjectFactory(
+        person1, person2, house_anchor="ascendant"
+    ).get_midpoint_composite_subject_model()
+
 PORPHYRY = "O"
 
 
@@ -972,11 +989,10 @@ def generate_composite_chart(
         matched = ("person2", "person1") if fallen1 else ("person1", "person2")
 
     # Create composite subject
-    composite_factory = CompositeSubjectFactory(person1, person2)
-    composite_subject = composite_factory.get_midpoint_composite_subject_model()
+    composite = composite_subject(person1, person2)
     
     # Create composite chart data
-    composite_data = ChartDataFactory.create_composite_chart_data(composite_subject, **ASPECT_SETTINGS)
+    composite_data = ChartDataFactory.create_composite_chart_data(composite, **ASPECT_SETTINGS)
     
     result = {
         "status": "success",
