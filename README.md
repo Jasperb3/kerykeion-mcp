@@ -32,7 +32,7 @@ An MCP (Model Context Protocol) server for astrological chart generation using t
 
 - All calculation is local and offline (`online=False` everywhere) -- birth data never leaves the machine running this server.
 - Subject names are logged at DEBUG only; INFO-level logs omit personal data.
-- Chart files are written to `~/.kerykeion_charts` by default, or a custom directory (see `output_dir` / `KERYKEION_OUTPUT_BASE` below).
+- Chart files are written to `KERYKEION_OUTPUT_BASE` if that environment variable is set, otherwise `~/.kerykeion_charts`; an `output_dir` must resolve under one of those two.
 - The default HTTP bind is loopback-only (`127.0.0.1`); binding to all interfaces requires an explicit opt-in and logs a warning.
 
 ## Installation
@@ -172,7 +172,7 @@ Most chart tools accept:
 - **house_system**: "P" (Placidus), "W" (Whole Sign), "K" (Koch), "M" (Morinus), etc.
 - **zodiac_type** / **sidereal_mode**: "Tropical" (default) or "Sidereal" (requires `sidereal_mode`, e.g. "LAHIRI")
 - **output_format**: "text", "images", or "all"
-- **output_dir**: Custom directory to save chart images (optional; must resolve under `~/.kerykeion_charts` or `KERYKEION_OUTPUT_BASE`)
+- **output_dir**: Custom directory to save chart images (optional; must resolve under `~/.kerykeion_charts` or `KERYKEION_OUTPUT_BASE`; defaults to `KERYKEION_OUTPUT_BASE` if set, else `~/.kerykeion_charts`)
 - **chart_style**: "full" (default), "wheel_only", or "aspect_grid"
 
 `generate_planetary_return` additionally accepts `return_month`/`return_day` (defaults to today, so lunar returns aren't stuck searching from January), `return_lat`/`return_lng`/`return_tz_str` to cast the return chart for the person's current location instead of their birth location, and `return_city`/`return_nation` to label that location (relocated returns default to a coordinate label). Sidereal return charts are rejected with an explanatory error — see Roadmap.

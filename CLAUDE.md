@@ -25,7 +25,7 @@ An MCP server wrapping [Kerykeion](https://github.com/g-battaglia/kerykeion) (Sw
 ## Testing
 
 - `tests/` is the real test suite (`uv run pytest -q`). `test_tools.py` (a manual print-script) was removed — do not recreate that pattern.
-- `tests/conftest.py` has `birth_rome`/`birth_london` fixtures for consistent golden-value tests, and `tmp_output_dir` (sets `KERYKEION_OUTPUT_BASE` so image-writing tests don't hit `~/.kerykeion_charts`).
+- `tests/conftest.py` has `birth_rome`/`birth_london` fixtures for consistent golden-value tests, and `tmp_output_dir` (sets `KERYKEION_OUTPUT_BASE`, which is also the default image directory when set, so image-writing tests don't hit `~/.kerykeion_charts`).
 - Golden-value tests pin known chart facts (e.g. Sun sign for a fixed birth) against the live Kerykeion install — treat these as regression guards on celestial mechanics, not on the server's own logic.
 
 ## Before trusting a Kerykeion API assumption
