@@ -173,6 +173,7 @@ Most chart tools accept:
 - **zodiac_type** / **sidereal_mode**: "Tropical" (default) or "Sidereal" (requires `sidereal_mode`, e.g. "LAHIRI")
 - **output_format**: "text", "images", or "all"
 - **output_dir**: Custom directory to save chart images (optional; must resolve under `~/.kerykeion_charts` or `KERYKEION_OUTPUT_BASE`; defaults to `KERYKEION_OUTPUT_BASE` if set, else `~/.kerykeion_charts`)
+- **city** / **nation**: labels only. Whatever is left blank is filled with coordinates ("Rome, 41.90N 12.50E", or just "41.90N, 12.50E"), never with kerykeion's default "Greenwich, GB".
 - **chart_style**: "full" (default), "wheel_only", or "aspect_grid"
 
 `generate_planetary_return` additionally accepts `return_month`/`return_day` (defaults to today, so lunar returns aren't stuck searching from January), `return_lat`/`return_lng`/`return_tz_str` to cast the return chart for the person's current location instead of their birth location, and `return_city`/`return_nation` to label that location (relocated returns default to a coordinate label). Sidereal return charts are rejected with an explanatory error — see Roadmap.

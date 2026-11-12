@@ -137,3 +137,68 @@ def test_get_synastry_aspects_contract(birth_rome, birth_london):
     )
     assert result["chart_type"] == "Synastry Aspects"
     assert "aspects" in result
+
+
+# --- location labels: kerykeion fills a blank nation with "GB" ---------------
+
+def birth_data_line(result):
+    return next(line for line in result["text"].splitlines() if line.startswith("Birth data:"))
+
+
+def test_city_without_nation_shows_coordinates_not_gb(birth_rome, tmp_output_dir):
+    result = generate_natal_chart(**birth_rome, city="Rome", output_format="all", output_dir=tmp_output_dir)
+    assert birth_data_line(result).endswith("Rome, 41.90N 12.50E")
+    svg = open(result["svg_path"], encoding="utf-8").read()
+    assert "Rome, 41.90N 12.50E" in svg
+    assert ", GB" not in svg
+
+
+def test_no_city_or_nation_shows_only_coordinates(birth_rome, tmp_output_dir):
+    result = generate_natal_chart(**birth_rome, output_format="all", output_dir=tmp_output_dir)
+    assert birth_data_line(result).endswith(", 41.90N, 12.50E")
+    svg = open(result["svg_path"], encoding="utf-8").read()
+    assert "41.90N, 12.50E" in svg
+    assert ", GB" not in svg
+
+
+def test_explicit_nation_is_kept(birth_rome):
+    result = generate_natal_chart(**birth_rome, city="Rome", nation="IT", output_format="text")
+    assert birth_data_line(result).endswith("Rome, IT")
+
+
+def test_nation_without_city_keeps_nation(birth_rome):
+    result = generate_natal_chart(**birth_rome, nation="IT", output_format="text")
+    assert birth_data_line(result).endswith("41.90N, 12.50E, IT")
+
+
+def test_second_subject_label_has_no_gb(birth_rome, birth_london):
+    result = generate_synastry_chart(
+        name1=birth_rome["name"], year1=birth_rome["year"], month1=birth_rome["month"],
+        day1=birth_rome["day"], hour1=birth_rome["hour"], minute1=birth_rome["minute"],
+        lat1=birth_rome["lat"], lng1=birth_rome["lng"], tz_str1=birth_rome["tz_str"],
+        name2=birth_london["name"], year2=birth_london["year"], month2=birth_london["month"],
+        day2=birth_london["day"], hour2=birth_london["hour"], minute2=birth_london["minute"],
+        lat2=birth_london["lat"], lng2=birth_london["lng"], tz_str2=birth_london["tz_str"],
+        city2="London", output_format="text",
+    )
+    assert "London, 51.51N 0.13W" in result["text"]
+    assert ", GB" not in result["text"]
+
+
+def test_transit_place_is_labelled_with_its_coordinates(birth_rome, tmp_output_dir):
+    # The transit subject has no city parameter; kerykeion would label it
+    # "Greenwich, GB" wherever it was cast.
+    result = generate_transit_chart(
+        natal_name=birth_rome["name"], natal_year=birth_rome["year"], natal_month=birth_rome["month"],
+        natal_day=birth_rome["day"], natal_hour=birth_rome["hour"], natal_minute=birth_rome["minute"],
+        natal_lat=birth_rome["lat"], natal_lng=birth_rome["lng"], natal_tz_str=birth_rome["tz_str"],
+        natal_city="Rome", natal_nation="IT",
+        transit_lat=69.65, transit_lng=18.95, transit_tz_str="Europe/Oslo",
+        transit_year=2026, transit_month=11, transit_day=12, transit_hour=12, transit_minute=0,
+        output_format="all", output_dir=tmp_output_dir,
+    )
+    svg = open(result["svg_path"], encoding="utf-8").read()
+    for output in (result["text"], svg):
+        assert "Greenwich" not in output
+        assert ", GB" not in output
+    assert "69.65N, 18.95E" in result["text"] + svg
