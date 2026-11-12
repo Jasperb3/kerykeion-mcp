@@ -180,14 +180,18 @@ def resolve_location(city: str, nation: str, lat: float, lng: float) -> tuple[st
     Resolve the city/nation label passed to kerykeion.
 
     kerykeion defaults blank city/nation to "Greenwich, GB" -- truthful only
-    for charts actually cast there. When the caller doesn't supply a city,
-    fall back to a coordinate-derived label instead of that default.
+    for charts actually cast there -- and prints them as "{city}, {nation}"
+    in both the wheel and the text. Fill whatever the caller left blank with
+    coordinates instead:
+    "Rome, IT" / "Rome, 41.90N 12.50E" / "41.90N, 12.50E, IT" / "41.90N, 12.50E".
     """
-    if city:
-        return city, nation
     lat_label = f"{abs(lat):.2f}{'N' if lat >= 0 else 'S'}"
     lng_label = f"{abs(lng):.2f}{'E' if lng >= 0 else 'W'}"
-    return f"{lat_label}, {lng_label}", nation
+    if city:
+        return city, nation or f"{lat_label} {lng_label}"
+    if nation:
+        return f"{lat_label}, {lng_label}", nation
+    return lat_label, lng_label
 
 # Server instructions for AI assistants
 SERVER_INSTRUCTIONS = """
@@ -644,6 +648,7 @@ def generate_transit_chart(
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
     natal_city, natal_nation = resolve_location(natal_city, natal_nation, natal_lat, natal_lng)
+    transit_city, transit_nation = resolve_location("", "", transit_lat, transit_lng)
 
     # Create natal subject
     natal = build_subject(
@@ -667,6 +672,7 @@ def generate_transit_chart(
             year=transit_year, month=transit_month, day=transit_day,
             hour=transit_hour, minute=transit_minute,
             lat=transit_lat, lng=transit_lng, tz_str=transit_tz_str,
+            city=transit_city, nation=transit_nation,
             houses_system_identifier=house_system,
             zodiac_type=zodiac_type,
             sidereal_mode=sidereal_mode,
@@ -677,6 +683,7 @@ def generate_transit_chart(
             AstrologicalSubjectFactory.from_current_time,
             name="Current Transits",
             lat=transit_lat, lng=transit_lng, tz_str=transit_tz_str,
+            city=transit_city, nation=transit_nation,
             houses_system_identifier=house_system,
             zodiac_type=zodiac_type,
             sidereal_mode=sidereal_mode,
@@ -1019,10 +1026,14 @@ def generate_planetary_return(
 
     # Create return factory and get return subject
     def find_return(factory_lat: float):
+        # kerykeion 5.6's factory treats a 0.0 coordinate as missing (`if not
+        # lat`). Its subject is discarded -- only the geocentric moment is used,
+        # and that does not depend on location -- so nudge a zero off zero.
+        nonzero = lambda coordinate: coordinate if coordinate != 0 else 1e-6
         return_factory = PlanetaryReturnFactory(
             subject=natal,
-            lat=factory_lat,
-            lng=search_lng,
+            lat=nonzero(factory_lat),
+            lng=nonzero(search_lng),
             tz_str=search_tz_str,
             online=False,
         )

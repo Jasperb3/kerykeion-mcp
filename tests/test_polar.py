@@ -376,6 +376,28 @@ def test_return_moment_does_not_depend_on_the_search_latitude():
     assert len(moments) == 1
 
 
+def test_return_moment_does_not_depend_on_the_search_location():
+    # generate_planetary_return also substitutes a placeholder for a 0.0
+    # coordinate (kerykeion treats it as missing); sound only while the
+    # moment is independent of where the search runs.
+    at = lambda lat, lng: generate_planetary_return(
+        name="t", **LONDON, **RETURN_DATE, return_lat=lat, return_lng=lng,
+        return_tz_str="Europe/London", output_format="text",
+    )["return_date"]
+    assert len({at(51.48, lng) for lng in (-120.0, -0.01, 0.01, 30.0, 150.0)}) == 1
+
+
+@pytest.mark.parametrize("lat, lng", [(51.4779, 0.0), (0.0, 30.0), (0.0, 0.0)])
+def test_return_at_zero_coordinates(lat, lng):
+    result = generate_planetary_return(
+        name="t", **LONDON, **RETURN_DATE, return_lat=lat, return_lng=lng,
+        return_tz_str="Europe/London", output_format="text",
+    )
+    assert result["status"] == "success", result
+    home = generate_planetary_return(name="t", **LONDON, **RETURN_DATE, output_format="text")
+    assert result["return_date"] == home["return_date"]
+
+
 def test_lunar_return_relocated_out_of_the_circle():
     result = generate_planetary_return(
         name="t", **TROMSO, return_type="Lunar", return_year=2026, return_month=11, return_day=1,

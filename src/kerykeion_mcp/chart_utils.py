@@ -119,9 +119,12 @@ def svg_to_png(svg_string: str, width: int = PNG_OUTPUT_WIDTH) -> Optional[bytes
 
 # Default output directory for charts
 def get_chart_output_dir() -> Path:
-    """Get the default output directory for chart files."""
-    # Use user's home directory for persistent storage
-    output_dir = Path.home() / ".kerykeion_charts"
+    """
+    Get the default output directory for chart files: KERYKEION_OUTPUT_BASE
+    if set, otherwise ~/.kerykeion_charts.
+    """
+    env_base = os.environ.get("KERYKEION_OUTPUT_BASE")
+    output_dir = Path(env_base).resolve() if env_base else Path.home() / ".kerykeion_charts"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
