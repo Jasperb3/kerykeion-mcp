@@ -141,8 +141,17 @@ def test_get_synastry_aspects_contract(birth_rome, birth_london):
 
 # --- location labels: kerykeion fills a blank nation with "GB" ---------------
 
+import re
+
+
+def places(result):
+    """Each subject's "{city}, {nation}" -- how the wheel prints it -- from the text."""
+    return [f"{city}, {nation}" for city, nation in re.findall(
+        r'<(?:birth|transit)_data [^>]*city="([^"]*)" nation="([^"]*)"', result["text"])]
+
+
 def birth_data_line(result):
-    return next(line for line in result["text"].splitlines() if line.startswith("Birth data:"))
+    return places(result)[0]
 
 
 def test_city_without_nation_shows_coordinates_not_gb(birth_rome, tmp_output_dir):
@@ -155,7 +164,7 @@ def test_city_without_nation_shows_coordinates_not_gb(birth_rome, tmp_output_dir
 
 def test_no_city_or_nation_shows_only_coordinates(birth_rome, tmp_output_dir):
     result = generate_natal_chart(**birth_rome, output_format="all", output_dir=tmp_output_dir)
-    assert birth_data_line(result).endswith(", 41.90N, 12.50E")
+    assert birth_data_line(result) == "41.90N, 12.50E"
     svg = open(result["svg_path"], encoding="utf-8").read()
     assert "41.90N, 12.50E" in svg
     assert ", GB" not in svg
@@ -181,7 +190,7 @@ def test_second_subject_label_has_no_gb(birth_rome, birth_london):
         lat2=birth_london["lat"], lng2=birth_london["lng"], tz_str2=birth_london["tz_str"],
         city2="London", output_format="text",
     )
-    assert "London, 51.51N 0.13W" in result["text"]
+    assert "London, 51.51N 0.13W" in places(result)
     assert ", GB" not in result["text"]
 
 
@@ -202,3 +211,45 @@ def test_transit_place_is_labelled_with_its_coordinates(birth_rome, tmp_output_d
         assert "Greenwich" not in output
         assert ", GB" not in output
     assert "69.65N, 18.95E" in result["text"] + svg
+
+
+# --- PNG conversion -------------------------------------------------------
+
+def test_css_variables_with_fallback_values_resolve():
+    from kerykeion_mcp.chart_utils import resolve_css_variables
+    svg = '<svg style="--a: 1; --c: var(--missing, 3);"><rect opacity="var(--b, 0.5)" x="var(--a, 2)" y="var(--c)"/></svg>'
+    resolved = resolve_css_variables(svg)
+    assert 'opacity="0.5"' in resolved  # undefined -> its fallback
+    assert 'x="1"' in resolved          # defined wins over the fallback
+    assert 'y="3"' in resolved          # fallback inside a definition
+    assert "var(" not in resolved.split(">", 1)[1]
+
+
+def test_natal_chart_png_is_written(birth_rome, tmp_output_dir):
+    from kerykeion_mcp.chart_utils import HAS_CAIROSVG
+    import pytest
+    if not HAS_CAIROSVG:
+        pytest.skip("cairosvg not installed")
+    result = generate_natal_chart(**birth_rome, output_format="all", output_dir=tmp_output_dir)
+    assert "png_path" in result
+    assert open(result["png_path"], "rb").read(8) == b"\x89PNG\r\n\x1a\n"
+
+
+# --- aspect settings: kerykeion 6 narrowed its defaults --------------------
+
+def test_aspects_use_the_5x_points_and_orbs(birth_rome):
+    # kerykeion 6 defaults to 14 points, five aspects at 5-6 degrees and
+    # wider Sun/Moon orbs; the server keeps the 5.x set (ASPECT_SETTINGS).
+    aspects = get_aspects(**birth_rome)["aspects"]
+    found = {(a["planet1"], a["planet2"], a["aspect_type"]) for a in aspects}
+    assert ("Saturn", "Mean_Lilith", "sextile") in found      # Lilith is active
+    assert ("Mars", "Descendant", "conjunction") in found     # so is the Descendant
+    assert ("Jupiter", "Saturn", "opposition") in found       # 8.14 deg: 10 deg orb, not 6
+    assert len(aspects) == 63
+
+
+def test_chart_text_keeps_the_5x_points(birth_rome):
+    text = generate_natal_chart(**birth_rome, output_format="text")["text"]
+    points = set(re.findall(r'<point name="([^"]+)"', text))
+    assert {"Mean_Lilith", "True_South_Lunar_Node", "Descendant", "Imum_Coeli"} <= points
+    assert len(points) == 18

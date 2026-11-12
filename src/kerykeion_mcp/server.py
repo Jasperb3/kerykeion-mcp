@@ -24,9 +24,9 @@ from kerykeion import (
     KerykeionException,
     to_context,
 )
+from kerykeion.settings.config_constants import V5_DEFAULT_ACTIVE_POINTS
 
-from . import polar
-from .polar import build_subject, fell_back, is_polar_error, PORPHYRY
+from . import engine
 from .chart_utils import (
     generate_and_save_images,
     HAS_CAIROSVG,
@@ -55,8 +55,26 @@ from .validation import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Cast polar charts at their true latitude instead of kerykeion's silent 66 deg.
-polar.install()
+# Refuse to run on anything but the Swiss Ephemeris with its data files.
+engine.check()
+
+# kerykeion 6 narrowed its defaults to 14 points (no Lilith, South Node,
+# Descendant or IC), five aspects at 5-6 degree orbs (no quintile) and +1.5
+# degrees for the Sun and Moon. These are meaning-bearing, so every subject and
+# aspect calculation passes the 5.x set this server has always computed.
+ACTIVE_POINTS = list(V5_DEFAULT_ACTIVE_POINTS)
+ASPECT_SETTINGS = dict(
+    active_points=ACTIVE_POINTS,
+    active_aspects=[
+        {"name": "conjunction", "orb": 10},
+        {"name": "opposition", "orb": 10},
+        {"name": "trine", "orb": 8},
+        {"name": "sextile", "orb": 6},
+        {"name": "square", "orb": 5},
+        {"name": "quintile", "orb": 1},
+    ],
+    point_orb_adjustments={},
+)
 
 
 def handle_chart_errors(func):
@@ -77,8 +95,8 @@ def handle_chart_errors(func):
         except KerykeionException as e:
             return {"status": "error", "error": str(e), "hint": ""}
         except swe.Error as e:
-            # Polar-circle house errors are handled by build_subject; anything
-            # else from the Swiss Ephemeris is about this chart's input.
+            # The Swiss Ephemeris backend's own errors (e.g. a date beyond the
+            # data files) are about this chart's input.
             return {
                 "status": "error",
                 "error": f"The Swiss Ephemeris could not calculate this chart: {e}",
@@ -122,6 +140,14 @@ def build_applied_settings(
     if chart_style is not None:
         settings["chart_style"] = chart_style
     return settings
+
+
+PORPHYRY = "O"
+
+
+def fell_back(subject, requested: str) -> bool:
+    """True if kerykeion cast this subject's houses with another system (the polar fallback)."""
+    return subject.effective_houses_system_identifier != requested
 
 
 POLAR_WARNING = (
@@ -225,10 +251,8 @@ A response may also carry a "warnings" list; act on every entry. Inside the
 polar circles (beyond about 66.56 deg N/S) Placidus and Koch houses do not
 exist, so those charts use Porphyry cusps instead: applied_settings.house_system
 then reads e.g. "O (Porphyry, polar fallback from P Placidus)" and a warning
-says so. Tell the user which house system was actually used. Far inside the
-circles, Regiomontanus and Campanus can also fail for some birth times; the
-error names the systems that always work there (Porphyry, Equal, Whole Sign,
-Morinus).
+says so. Tell the user which house system was actually used. Every other
+house system is cast as asked at the true latitude.
 
 Common timezones: UTC, Europe/London, Europe/Paris, Europe/Rome,
 America/New_York, America/Los_Angeles, Asia/Tokyo, Australia/Sydney
@@ -372,8 +396,7 @@ def generate_natal_chart(
     city, nation = resolve_location(city, nation, lat, lng)
 
     # Create astrological subject
-    subject = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    subject = AstrologicalSubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -383,10 +406,11 @@ def generate_natal_chart(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
     # Create chart data
-    chart_data = ChartDataFactory.create_natal_chart_data(subject)
+    chart_data = ChartDataFactory.create_natal_chart_data(subject, **ASPECT_SETTINGS)
 
     # Build response
     result = {
@@ -496,8 +520,7 @@ def generate_synastry_chart(
     city2, nation2 = resolve_location(city2, nation2, lat2, lng2)
 
     # Create both subjects
-    person1 = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    person1 = AstrologicalSubjectFactory.from_birth_data(
         name=name1, year=year1, month=month1, day=day1,
         hour=hour1, minute=minute1,
         lat=lat1, lng=lng1, tz_str=tz_str1,
@@ -506,10 +529,10 @@ def generate_synastry_chart(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
-    person2 = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    person2 = AstrologicalSubjectFactory.from_birth_data(
         name=name2, year=year2, month=month2, day=day2,
         hour=hour2, minute=minute2,
         lat=lat2, lng=lng2, tz_str=tz_str2,
@@ -518,6 +541,7 @@ def generate_synastry_chart(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
     # Create synastry chart data
@@ -526,6 +550,7 @@ def generate_synastry_chart(
         second_subject=person2,
         include_house_comparison=True,
         include_relationship_score=include_relationship_score,
+        **ASPECT_SETTINGS,
     )
 
     result = {
@@ -651,8 +676,7 @@ def generate_transit_chart(
     transit_city, transit_nation = resolve_location("", "", transit_lat, transit_lng)
 
     # Create natal subject
-    natal = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    natal = AstrologicalSubjectFactory.from_birth_data(
         name=natal_name,
         year=natal_year, month=natal_month, day=natal_day,
         hour=natal_hour, minute=natal_minute,
@@ -662,12 +686,12 @@ def generate_transit_chart(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
     # Create transit subject - either current time or specified time
     if all(v is not None for v in [transit_year, transit_month, transit_day, transit_hour, transit_minute]):
-        transit = build_subject(
-            AstrologicalSubjectFactory.from_birth_data,
+        transit = AstrologicalSubjectFactory.from_birth_data(
             name="Transits",
             year=transit_year, month=transit_month, day=transit_day,
             hour=transit_hour, minute=transit_minute,
@@ -677,10 +701,10 @@ def generate_transit_chart(
             zodiac_type=zodiac_type,
             sidereal_mode=sidereal_mode,
             online=False,
+            active_points=ACTIVE_POINTS,
         )
     else:
-        transit = build_subject(
-            AstrologicalSubjectFactory.from_current_time,
+        transit = AstrologicalSubjectFactory.from_current_time(
             name="Current Transits",
             lat=transit_lat, lng=transit_lng, tz_str=transit_tz_str,
             city=transit_city, nation=transit_nation,
@@ -688,12 +712,14 @@ def generate_transit_chart(
             zodiac_type=zodiac_type,
             sidereal_mode=sidereal_mode,
             online=False,
+            active_points=ACTIVE_POINTS,
         )
 
     # Create transit chart data
     transit_data = ChartDataFactory.create_transit_chart_data(
         natal_subject=natal,
         transit_subject=transit,
+        **ASPECT_SETTINGS,
     )
 
     result = {
@@ -812,8 +838,9 @@ def generate_composite_chart(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
-    person1 = build_subject(AstrologicalSubjectFactory.from_birth_data, **person1_args)
+    person1 = AstrologicalSubjectFactory.from_birth_data(**person1_args)
 
     person2_args = dict(
         name=name2, year=year2, month=month2, day=day2,
@@ -824,27 +851,29 @@ def generate_composite_chart(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
-    person2 = build_subject(AstrologicalSubjectFactory.from_birth_data, **person2_args)
+    person2 = AstrologicalSubjectFactory.from_birth_data(**person2_args)
 
-    # CompositeSubjectFactory refuses two different house systems, so if only
-    # one person fell back to Porphyry, cast the other with Porphyry too.
+    # CompositeSubjectFactory refuses two different *requested* house systems,
+    # so if only one person fell back to Porphyry, cast both with Porphyry
+    # explicitly. (The polar one still reports its fallback: its effective
+    # system differs from the one the caller asked for.)
     matched = None
-    if fell_back(person1, house_system) and not fell_back(person2, house_system):
-        person2 = AstrologicalSubjectFactory.from_birth_data(
-            **{**person2_args, "houses_system_identifier": PORPHYRY})
-        matched = ("person2", "person1")
-    elif fell_back(person2, house_system) and not fell_back(person1, house_system):
+    fallen1, fallen2 = fell_back(person1, house_system), fell_back(person2, house_system)
+    if fallen1 != fallen2:
         person1 = AstrologicalSubjectFactory.from_birth_data(
             **{**person1_args, "houses_system_identifier": PORPHYRY})
-        matched = ("person1", "person2")
+        person2 = AstrologicalSubjectFactory.from_birth_data(
+            **{**person2_args, "houses_system_identifier": PORPHYRY})
+        matched = ("person2", "person1") if fallen1 else ("person1", "person2")
 
     # Create composite subject
     composite_factory = CompositeSubjectFactory(person1, person2)
     composite_subject = composite_factory.get_midpoint_composite_subject_model()
     
     # Create composite chart data
-    composite_data = ChartDataFactory.create_composite_chart_data(composite_subject)
+    composite_data = ChartDataFactory.create_composite_chart_data(composite_subject, **ASPECT_SETTINGS)
     
     result = {
         "status": "success",
@@ -1011,8 +1040,7 @@ def generate_planetary_return(
             return_day = 1
 
     # Create natal subject
-    natal = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    natal = AstrologicalSubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -1022,48 +1050,30 @@ def generate_planetary_return(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
     # Create return factory and get return subject
-    def find_return(factory_lat: float):
-        # kerykeion 5.6's factory treats a 0.0 coordinate as missing (`if not
-        # lat`). Its subject is discarded -- only the geocentric moment is used,
-        # and that does not depend on location -- so nudge a zero off zero.
-        nonzero = lambda coordinate: coordinate if coordinate != 0 else 1e-6
-        return_factory = PlanetaryReturnFactory(
-            subject=natal,
-            lat=nonzero(factory_lat),
-            lng=nonzero(search_lng),
-            tz_str=search_tz_str,
-            online=False,
-        )
-        # Use next_return_from_date (next_return_from_year is deprecated)
-        return return_factory.next_return_from_date(
-            year=return_year,
-            month=return_month,
-            day=return_day,
-            return_type=return_type,
-        )
-
-    try:
-        return_model = find_return(search_lat)
-    except swe.Error as error:
-        if not is_polar_error(error):
-            raise
-        # The factory always builds its own Placidus subject, which fails
-        # inside a polar circle. Only its moment is used (the subject is
-        # rebuilt below), and that geocentric Sun/Moon crossing does not
-        # depend on latitude, so search from 66 deg -- the latitude
-        # kerykeion's own clamp used. (Not 0.0: kerykeion treats a zero
-        # latitude as missing.)
-        return_model = find_return(66.0 if search_lat > 0 else -66.0)
+    return_factory = PlanetaryReturnFactory(
+        subject=natal,
+        lat=search_lat,
+        lng=search_lng,
+        tz_str=search_tz_str,
+        online=False,
+    )
+    # Use next_return_from_date (next_return_from_year is deprecated)
+    return_model = return_factory.next_return_from_date(
+        year=return_year,
+        month=return_month,
+        day=return_day,
+        return_type=return_type,
+    )
 
     # The factory only locates the moment of exactitude -- the subject it
     # builds ignores the requested house system (always Placidus). Rebuild
     # the return subject at that moment with the settings actually requested,
     # so applied_settings stays truthful by construction.
-    return_subject = build_subject(
-        AstrologicalSubjectFactory.from_iso_utc_time,
+    return_subject = AstrologicalSubjectFactory.from_iso_utc_time(
         name=f"{name} {return_type} Return",
         iso_utc_time=return_model.iso_formatted_utc_datetime,
         lat=search_lat, lng=search_lng, tz_str=search_tz_str,
@@ -1072,8 +1082,9 @@ def generate_planetary_return(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
-    return_data = ChartDataFactory.create_natal_chart_data(return_subject)
+    return_data = ChartDataFactory.create_natal_chart_data(return_subject, **ASPECT_SETTINGS)
 
     result = {
         "status": "success",
@@ -1168,8 +1179,7 @@ def generate_event_chart(
     city, nation = resolve_location(city, nation, lat, lng)
 
     # Create subject for the event moment
-    event_subject = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    event_subject = AstrologicalSubjectFactory.from_birth_data(
         name=event_name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -1179,9 +1189,10 @@ def generate_event_chart(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
-    chart_data = ChartDataFactory.create_natal_chart_data(event_subject)
+    chart_data = ChartDataFactory.create_natal_chart_data(event_subject, **ASPECT_SETTINGS)
 
     result = {
         "status": "success",
@@ -1257,8 +1268,7 @@ def get_current_positions(
     city, nation = resolve_location(city, nation, lat, lng)
 
     # Create subject for current time
-    now = build_subject(
-        AstrologicalSubjectFactory.from_current_time,
+    now = AstrologicalSubjectFactory.from_current_time(
         name="Current Positions",
         lat=lat, lng=lng, tz_str=tz_str,
         city=city, nation=nation,
@@ -1266,6 +1276,7 @@ def get_current_positions(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
     result = {
@@ -1337,8 +1348,7 @@ def get_aspects(
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
 
-    subject = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    subject = AstrologicalSubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -1347,9 +1357,10 @@ def get_aspects(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
     
-    aspect_result = AspectsFactory.single_chart_aspects(subject)
+    aspect_result = AspectsFactory.single_chart_aspects(subject, **ASPECT_SETTINGS)
     
     # Format aspects for AI consumption
     aspects_list = []
@@ -1430,8 +1441,7 @@ def get_synastry_aspects(
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
 
-    person1 = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    person1 = AstrologicalSubjectFactory.from_birth_data(
         name=name1, year=year1, month=month1, day=day1,
         hour=hour1, minute=minute1,
         lat=lat1, lng=lng1, tz_str=tz_str1,
@@ -1439,10 +1449,10 @@ def get_synastry_aspects(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
-    person2 = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    person2 = AstrologicalSubjectFactory.from_birth_data(
         name=name2, year=year2, month=month2, day=day2,
         hour=hour2, minute=minute2,
         lat=lat2, lng=lng2, tz_str=tz_str2,
@@ -1450,9 +1460,10 @@ def get_synastry_aspects(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
     
-    aspect_result = AspectsFactory.dual_chart_aspects(person1, person2)
+    aspect_result = AspectsFactory.dual_chart_aspects(person1, person2, **ASPECT_SETTINGS)
     
     # Format aspects for AI consumption
     aspects_list = []
@@ -1530,8 +1541,7 @@ def get_chart_patterns(
     zodiac_type = validate_zodiac_type(zodiac_type)
     sidereal_mode = validate_sidereal_mode(zodiac_type, sidereal_mode)
 
-    subject = build_subject(
-        AstrologicalSubjectFactory.from_birth_data,
+    subject = AstrologicalSubjectFactory.from_birth_data(
         name=name,
         year=year, month=month, day=day,
         hour=hour, minute=minute,
@@ -1540,9 +1550,10 @@ def get_chart_patterns(
         zodiac_type=zodiac_type,
         sidereal_mode=sidereal_mode,
         online=False,
+        active_points=ACTIVE_POINTS,
     )
 
-    aspect_result = AspectsFactory.single_chart_aspects(subject)
+    aspect_result = AspectsFactory.single_chart_aspects(subject, **ASPECT_SETTINGS)
     aspects = [
         {"p1": a.p1_name, "p2": a.p2_name, "type": a.aspect}
         for a in aspect_result.aspects
