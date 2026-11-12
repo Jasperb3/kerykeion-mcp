@@ -1709,6 +1709,24 @@ def get_chart_patterns(
 # Server Entry Point
 # =============================================================================
 
+def warm_up() -> None:
+    """
+    Cast one chart so kerykeion's lazy imports happen before serving.
+
+    kerykeion imports libephemeris (and with it erfa and numpy) the first time
+    a subject is built, from its fixed-star catalog. On Windows, loading those
+    native extensions blocks while the stdio transport's reader thread has a
+    read pending on stdin, so a tool call that triggered it froze the whole
+    event loop until the client sent another message: a batch of calls from
+    Claude Desktop then timed out together. Done here, nothing is reading yet.
+    """
+    subject = SubjectFactory.from_birth_data(
+        name="warm-up", year=2000, month=1, day=1, hour=12, minute=0,
+        lat=51.5, lng=0.0, tz_str="UTC", online=False, active_points=ACTIVE_POINTS,
+    )
+    to_context(ChartDataFactory.create_natal_chart_data(subject, **ASPECT_SETTINGS))
+
+
 def main():
     """Start the MCP server."""
     import argparse
@@ -1722,6 +1740,7 @@ def main():
 
     logger.info("Starting Kerykeion MCP Server")
     logger.info(f"PNG conversion available: {HAS_CAIROSVG}")
+    warm_up()
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(
