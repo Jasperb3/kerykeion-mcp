@@ -447,49 +447,68 @@ def test_other_errors_carry_no_type(birth_rome):
 
 
 # --- the angles' motion --------------------------------------------------------
-# Inside the polar circles the Ascendant really runs backwards through the
-# zodiac for part of the day (the Swiss Ephemeris speed matches a finite
-# difference); kerykeion hard-codes the angles as direct.
+# The angles turn with the sky (~360 degrees a day), not as planets move, and
+# inside the polar circles the Ascendant even runs backwards for part of the
+# day. A motion flag or speed on them reads as planetary motion, so no output
+# carries either; planets and nodes keep theirs.
 
 SVALBARD_BACKWARD = dict(year=1990, month=6, day=15, hour=2, minute=0, lat=78.22, lng=15.63, tz_str="UTC")
+MCMURDO = dict(year=1992, month=12, day=21, hour=3, minute=30, lat=-77.846, lng=166.676, tz_str="Antarctica/McMurdo")
+ANGLE_POINT = re.compile(r'<point name="(?:Ascendant|Descendant|Medium_Coeli|Imum_Coeli)" [^>]*>')
 
 
-def point(text, name):
-    return re.search(rf'<point name="{name}" [^>]*motion="(\w+)" speed="(-?[\d.]+)"', text).groups()
+def assert_angles_carry_no_motion(text):
+    angles = ANGLE_POINT.findall(text)
+    assert angles, "no angle points in the text"
+    for element in angles:
+        assert "motion=" not in element and "speed=" not in element, element
+    for name in ("Sun", "True_North_Lunar_Node"):
+        assert re.search(rf'<point name="{name}" [^>]*motion="(?:direct|retrograde)" speed="-?[\d.]+"', text), name
 
 
-def test_a_backward_polar_ascendant_is_reported_retrograde():
-    text = generate_natal_chart(name="t", **SVALBARD_BACKWARD, house_system="W", output_format="text")["text"]
-    for name in ("Ascendant", "Descendant"):
-        motion, speed = point(text, name)
-        assert float(speed) == pytest.approx(-113.68, abs=0.01)
-        assert motion == "retrograde"
-    for name in ("Medium_Coeli", "Imum_Coeli"):
-        motion, speed = point(text, name)
-        assert float(speed) > 0 and motion == "direct"
+def every_text_output(place):
+    date = {k: v for k, v in place.items() if k in ("year", "month", "day", "hour", "minute")}
+    return {
+        "natal": generate_natal_chart(name="t", **place, output_format="text"),
+        "synastry": generate_synastry_chart(**pair(LONDON, place), output_format="text"),
+        "transit": generate_transit_chart(
+            **natal_args(LONDON), transit_lat=place["lat"], transit_lng=place["lng"],
+            transit_tz_str=place["tz_str"], **{f"transit_{k}": v for k, v in date.items()},
+            output_format="text"),
+        "return": generate_planetary_return(name="t", **place, return_year=2026, output_format="text"),
+        "event": generate_event_chart(event_name="t", **place, output_format="text"),
+        "current": get_current_positions(lat=place["lat"], lng=place["lng"], tz_str=place["tz_str"]),
+    }
 
 
-def test_ordinary_angles_stay_direct():
-    text = generate_natal_chart(name="t", **LONDON, output_format="text")["text"]
+@pytest.mark.parametrize("place", [LONDON, MCMURDO, SVALBARD_BACKWARD], ids=["london", "mcmurdo", "svalbard"])
+def test_no_output_gives_the_angles_a_motion_or_speed(place):
+    for kind, result in every_text_output(place).items():
+        assert result["status"] == "success", (kind, result)
+        assert_angles_carry_no_motion(result["text"])
+
+
+def test_composite_angles_carry_no_motion():
+    text = generate_composite_chart(**pair(LONDON, MCMURDO), output_format="text")["text"]
+    for element in ANGLE_POINT.findall(text):
+        assert "motion=" not in element and "speed=" not in element, element
+
+
+def test_a_backward_polar_ascendant_gets_no_retrograde_glyph(tmp_output_dir):
+    result = generate_natal_chart(name="t", **SVALBARD_BACKWARD, house_system="W", output_format="images")
+    svg = open(result["svg_path"], encoding="utf-8").read()
     for name in ("Ascendant", "Descendant", "Medium_Coeli", "Imum_Coeli"):
-        motion, speed = point(text, name)
-        assert float(speed) > 0 and motion == "direct"
+        elements = re.findall(rf"<g [^>]*kr:slug='{name}'[^>]*>", svg)
+        assert elements, name
+        for element in elements:
+            assert "kr:retrograde" not in element, element
+    assert "kr:slug='Pluto' kr:retrograde" in svg  # planets keep the glyph
 
 
-def test_a_near_zero_angle_speed_is_not_retrograde():
-    from kerykeion_mcp.server import fix_axis_motion
-    subject = build(LONDON, active_points=None)
-    subject.ascendant.speed = -1e-9
-    assert fix_axis_motion(subject).ascendant.retrograde is False
-
-
-def test_every_tool_reports_the_backward_ascendant():
-    transit = generate_transit_chart(
-        **natal_args(LONDON), transit_lat=78.22, transit_lng=15.63, transit_tz_str="UTC",
-        **{f"transit_{k}": v for k, v in SVALBARD_BACKWARD.items() if k in ("year", "month", "day", "hour", "minute")},
-        house_system="W", output_format="text")
-    synastry = generate_synastry_chart(**pair(LONDON, SVALBARD_BACKWARD), house_system="W", output_format="text")
-    event = generate_event_chart(event_name="t", **SVALBARD_BACKWARD, house_system="W", output_format="text")
-    for result in (transit, synastry, event):
-        assert result["status"] == "success", result
-        assert re.search(r'<point name="Ascendant" [^>]*motion="retrograde" speed="-113.679', result["text"])
+def test_angles_keep_their_speed_for_aspect_movement():
+    # The speed stays in the model: kerykeion times applying/separating
+    # aspects to an angle from it.
+    from kerykeion_mcp.server import SubjectFactory
+    subject = SubjectFactory.from_birth_data(name="t", **SVALBARD_BACKWARD, houses_system_identifier="W", online=False)
+    assert subject.ascendant.speed == pytest.approx(-113.68, abs=0.01)
+    assert subject.ascendant.retrograde is None

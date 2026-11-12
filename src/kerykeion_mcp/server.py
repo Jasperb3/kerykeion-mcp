@@ -79,30 +79,30 @@ ASPECT_SETTINGS = dict(
 
 
 ANGLES = ("ascendant", "descendant", "medium_coeli", "imum_coeli")
-# Below this an angle's speed is floating-point noise, not motion.
-ANGLE_SPEED_EPSILON = 1e-6
 
 
 def fix_axis_motion(subject):
     """
-    Flag an angle retrograde when it moves backwards through the zodiac.
+    Give the angles no motion flag.
 
-    kerykeion takes the angles' speeds from the Swiss Ephemeris (houses_ex2)
-    but hard-codes them as direct. Outside the polar circles the angles always
-    move forwards; inside them the Ascendant (and so the Descendant) runs
-    backwards for part of the day, at the speed reported -- it matches a
-    finite difference of the Ascendant itself. The speed is kept as it is and
-    the flag made to agree with it.
+    The angles turn with the sky (about 360 degrees a day) rather than move as
+    planets do, so "direct" or "retrograde" on them reads as planetary motion
+    that isn't there -- and inside the polar circles, where the Ascendant runs
+    backwards for part of the day, kerykeion's speed would make it read as
+    retrograde. The flag is cleared (no motion attribute in the text, no
+    retrograde glyph on the wheel); the speed stays in the model because
+    kerykeion times applying/separating aspects to an angle from it, and
+    context_text drops it from the text.
     """
     for name in ANGLES:
         angle = getattr(subject, name, None)
-        if angle is not None and angle.speed is not None:
-            angle.retrograde = angle.speed < -ANGLE_SPEED_EPSILON
+        if angle is not None:
+            angle.retrograde = None
     return subject
 
 
 class SubjectFactory(AstrologicalSubjectFactory):
-    """AstrologicalSubjectFactory whose subjects' angles carry a truthful motion flag."""
+    """AstrologicalSubjectFactory whose subjects' angles carry no motion flag."""
 
     @classmethod
     def from_birth_data(cls, *args, **kwargs):
@@ -301,6 +301,11 @@ _FILLED_CITY = re.compile(rf'(<(?:birth|transit)_data [^>]*?)city="(?:{_LAT}, {_
 _FILLED_NATION = re.compile(rf'(<(?:birth|transit)_data [^>]*?)nation="(?:{_LAT} {_LNG}|{_LNG})"')
 
 
+# The four angles' <point> elements: their motion and speed are dropped.
+_ANGLE_POINT = re.compile(r'<point name="(?:Ascendant|Descendant|Medium_Coeli|Imum_Coeli)" [^>]*>')
+_MOTION_ATTRS = re.compile(r' (?:motion|speed)="[^"]*"')
+
+
 def context_text(chart, chart_type: Optional[str] = None, data_tag: Optional[str] = None) -> str:
     """
     kerykeion's to_context text for `chart`, with the structured place fields
@@ -311,6 +316,9 @@ def context_text(chart, chart_type: Optional[str] = None, data_tag: Optional[str
     the city and nation fields ("78.22N", "15.63E"). They are emptied there --
     the element's lat/lng attributes already carry the coordinates.
 
+    The angles' motion and speed are dropped from every chart (returns
+    included, whose subjects kerykeion builds itself): see fix_axis_motion.
+
     `chart_type` names a single-wheel chart that kerykeion can only build as
     natal chart data (returns, events): it replaces the type of the
     <chart_analysis> element, and nothing else. `data_tag` renames the
@@ -319,6 +327,7 @@ def context_text(chart, chart_type: Optional[str] = None, data_tag: Optional[str
     text = to_context(chart)
     text = _FILLED_CITY.sub(r'\1city=""', text)
     text = _FILLED_NATION.sub(r'\1nation=""', text)
+    text = _ANGLE_POINT.sub(lambda m: _MOTION_ATTRS.sub("", m.group(0)), text)
     if chart_type:
         text = text.replace('<chart_analysis type="Natal">', f'<chart_analysis type="{chart_type}">', 1)
     if data_tag:

@@ -324,5 +324,8 @@ def test_synastry_and_composite_text_is_kerykeions_own(birth_rome, birth_london)
     composite = ChartDataFactory.create_composite_chart_data(
         CompositeSubjectFactory(first, second).get_midpoint_composite_subject_model(), **ASPECT_SETTINGS)
     for data, chart_type in ((synastry, "Synastry"), (composite, "Composite")):
-        assert context_text(data) == to_context(data)
+        # Only the angles' motion and speed differ (see test_polar).
+        motionless = re.sub(r'(<point name="(?:Ascendant|Descendant|Medium_Coeli|Imum_Coeli)" [^>]*?)'
+                            r' motion="[^"]*" speed="[^"]*"', r"\1", to_context(data))
+        assert context_text(data) == motionless
         assert f'<chart_analysis type="{chart_type}">' in context_text(data)
