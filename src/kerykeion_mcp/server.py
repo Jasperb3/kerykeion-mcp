@@ -6,6 +6,11 @@ capabilities using the Kerykeion library. Works with Claude Desktop and
 ChatGPT Desktop via standard MCP transport.
 """
 
+import time
+
+# Start-up timings in the log are measured from here, before the heavy imports.
+_STARTED = time.perf_counter()
+
 import functools
 import logging
 import re
@@ -56,8 +61,14 @@ from .validation import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Refuse to run on anything but the Swiss Ephemeris with its data files.
-engine.check()
+# Refuse to run on anything but the Swiss Ephemeris with its data files: one
+# readable line on stderr (what an MCP client's log shows), not a traceback.
+try:
+    engine.check()
+except RuntimeError as e:
+    logger.error(f"Cannot start: {e}")
+    raise SystemExit(1)
+_IMPORTED = time.perf_counter()
 
 # kerykeion 6 narrowed its defaults to 14 points (no Lilith, South Node,
 # Descendant or IC), five aspects at 5-6 degree orbs (no quintile) and +1.5
@@ -1855,9 +1866,18 @@ def main():
     parser.add_argument("--port", type=int, default=8000, help="Port to bind HTTP transports to (default: 8000)")
     args = parser.parse_args()
 
-    logger.info("Starting Kerykeion MCP Server")
+    from kerykeion.ephemeris_backend.backend import EPHE_DATA_PATH
+
+    from . import __version__
+
+    logger.info(
+        f"Starting Kerykeion MCP Server v{__version__} "
+        f"(imports and engine check took {_IMPORTED - _STARTED:.2f}s)")
+    logger.info(f"Ephemeris: {engine.BACKEND}, data files in {EPHE_DATA_PATH}")
     logger.info(f"PNG conversion available: {HAS_CAIROSVG}")
+    warm_start = time.perf_counter()
     warm_up()
+    logger.info(f"Warm-up done in {time.perf_counter() - warm_start:.2f}s")
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(
@@ -1880,7 +1900,7 @@ def main():
         uvicorn.run(mcp.streamable_http_app(), host=args.host, port=args.port)
     else:
         # Default: stdio transport for Claude Desktop
-        logger.info("Running with stdio transport (use --http for HTTP mode)")
+        logger.info(f"Ready after {time.perf_counter() - _STARTED:.2f}s: serving stdio (use --http for HTTP mode)")
         mcp.run(transport="stdio")
 
 
