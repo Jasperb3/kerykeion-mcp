@@ -10,7 +10,8 @@ keywords = ["mcp", "astrology", "kerykeion", "charts"]
 
 dependencies = [
     "mcp[cli]>=1.0.0",
-    "kerykeion>=5.6.0",
+    # polar.install() refuses unchecked versions; widen with polar.SUPPORTED.
+    "kerykeion>=5.6.3,<5.7",
     "pytz>=2024.1",
     "cairosvg>=2.7.0",
 ]
@@ -31,8 +32,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/kerykeion_mcp"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]
