@@ -89,7 +89,10 @@ def handle_chart_errors(func):
         try:
             return func(*args, **kwargs)
         except ChartInputError as e:
-            return {"status": "error", "error": e.message, "hint": e.hint}
+            response = {"status": "error", "error": e.message, "hint": e.hint}
+            if e.error_type:
+                response["type"] = e.error_type
+            return response
         except pytz.exceptions.UnknownTimeZoneError as e:
             return {"status": "error", "error": f"Unknown timezone: {e}", "hint": ""}
         except KerykeionException as e:
