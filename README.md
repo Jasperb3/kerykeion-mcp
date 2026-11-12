@@ -84,7 +84,9 @@ uv run pytest -q
 |---|---|
 | `test_astrological_correctness.py` | Golden-value regression checks against the live Kerykeion/Swiss Ephemeris install (e.g. known Sun sign for a fixed birth) |
 | `test_contracts.py` | Response shape -- `status`, `applied_settings`, error format |
-| `test_polar.py` | Polar latitudes: true latitude kept, cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool |
+| `test_polar.py` | Polar latitudes: true latitude kept, cusps match the Swiss Ephemeris at the true latitude, the Placidus/Koch → Porphyry fallback is reported by every tool, pole charts are refused, a backwards polar Ascendant is flagged retrograde |
+| `test_composite.py` | Composite houses hang from the Ascendant (immanuel's construction) over a London/Svalbard grid: cusp midpoints, Asc on cusp 1, MC on cusp 10, planet houses |
+| `test_startup.py` | `main()` loads kerykeion's lazy native imports before serving stdio (the Windows first-call stall) |
 | `test_engine.py` | The Swiss Ephemeris backend with its data files (not libephemeris, not Moshier); planets match the immanuel engine |
 | `test_patterns.py` | Pattern-detection logic in `patterns.py` (stelliums, T-squares, yods, etc.) against synthetic aspect fixtures |
 | `test_security.py` | Output-path confinement, PII-in-logs, loopback-only HTTP bind |
