@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.2
+
+### Changed
+- **Contract change: the angles carry no `motion` or `speed`.** This reverses 0.3.1's retrograde flag. In every chart's text (natal, synastry, transit, composite, return, event, current positions), the Ascendant, Descendant, MC and IC `<point>` elements now have neither attribute. The speeds (e.g. 254°/day for London's Ascendant) are the sky's daily turn, not motion through the zodiac, and 0.3.1 marked a polar Ascendant that turns backwards `motion="retrograde"` (McMurdo: `speed="-238.5403"`). It also drew ℞ beside it on the wheel. Both are gone. Returns showed a hard-coded `motion="direct"` with the same kind of speed; that is gone too. Planets and nodes are unchanged. The speed stays in the model, so `movement="applying"`/`"separating"` on aspects to an angle is unchanged.
+
+### Added
+- **`exclude_derived_points`** on every tool that lists aspects: `get_aspects`, `get_synastry_aspects`, `get_chart_patterns`, and the text and wheel of the natal, synastry, transit, composite, return and event charts. With `true`, aspects to the Descendant, IC and South Node are dropped (each mirrors one to the Ascendant, MC or North Node), and so are aspects between two angles.
+  - kerykeion already leaves out a chart's own Asc–Desc, MC–IC and node pairs. Across two charts it keeps every contact to both ends of each axis, so London × McMurdo goes from 116 synastry aspects to 76 (London's natal from 52 to 34).
+  - **It defaults to `false`**, so default responses are unchanged. With `true`, `applied_settings` reports `exclude_derived_points: true`.
+  - The one loss is a quintile to a derived point: its mirror is a 108° aspect, which isn't computed.
+  - `relationship_score` is computed before the filter, so the option doesn't change it.
+- Start-up logs each phase to stderr: `Starting Kerykeion MCP Server v0.3.2 (imports and engine check took N s)`, `Ephemeris: swisseph, data files in <path>`, `Warm-up done in N s` and `Ready after N s: serving stdio`.
+- `scripts/startup_probe.py` launches the server as Claude Desktop does. It times `initialize`, `tools/list` and, with `--call`, a first tool call, and prints the server's stderr. `--cwd` launches it from another directory. README: a Windows troubleshooting section.
+
+### Fixed
+- Missing ephemeris files (or a wrong `KERYKEION_EPHE_PATH`) stop the server with one `ERROR: Cannot start: …` line naming the files, the path and the fix, and exit code 1. Before, the same message came at the end of a Python traceback.
+- `kerykeion_mcp.__version__` had stayed at `0.3.0`.
+
+### Considered, not changed
+Windows measurements with Claude Desktop's command: `initialize` answers in 2.3–2.6 s warm, 8.8 s with the bytecode recompiled, and 28 s on the very first run.
+- **Warm-up in a background thread after the handshake** was not adopted. On Windows the background warm-up never finished, still running after 20 s, because a native import blocks while the stdio reader waits on stdin (the 0.3.1 stall). The warm-up stays before serving.
+- **Lazy cairosvg import** was not adopted. It would save about 0.3 s of the 2.5 s on Windows, but the start-up line `PNG conversion available` would become a guess.
+- **uv overhead** is about 0.1 s per launch. The README suggests launching the venv's `python.exe` directly for robustness (no re-sync at launch), not for speed.
+
 ## 0.3.1
 
 ### Fixed
