@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+### Fixed
+- **No more "GB" in location labels.** kerykeion fills a blank `nation` with "GB" and prints "{city}, {nation}" on the wheel *and* in the text, so `city="Rome"` alone read "Rome, GB". Blank parts are now filled with coordinates: "Rome, 41.90N 12.50E", or "41.90N, 12.50E" with neither. Transit charts' transit place, which had no label at all and read "Greenwich, GB", now carries its coordinates.
+- **`KERYKEION_OUTPUT_BASE` now sets the default image directory**, not only an extra allowed one. `~/.kerykeion_charts` stays allowed.
+- **Planetary returns at latitude or longitude 0.0** (the equator, Greenwich) no longer fail: kerykeion 5.6's return factory treated 0.0 as missing.
+
+### Changed
+- kerykeion is pinned to `>=5.6.3,<5.7`. The polar shim refuses other versions, so an unpinned upgrade (5.7+, 6.x) stopped the server from starting.
+- Dev dependencies moved from the deprecated `[tool.uv] dev-dependencies` to `[dependency-groups]`.
+
 ## 0.2.0
 
 ### Fixed

@@ -1,6 +1,6 @@
 [project]
 name = "kerykeion-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server for astrological chart generation using Kerykeion"
 readme = "README.md"
 requires-python = ">=3.10"

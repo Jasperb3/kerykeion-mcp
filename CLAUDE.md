@@ -30,4 +30,6 @@ An MCP server wrapping [Kerykeion](https://github.com/g-battaglia/kerykeion) (Sw
 
 ## Before trusting a Kerykeion API assumption
 
+kerykeion is pinned to a minor series (`pyproject.toml`) because `polar.install()` refuses unchecked versions. Widen the pin and `polar.SUPPORTED` together, only after re-checking what the shim patches.
+
 Verify against the installed library (`python -c "import inspect, kerykeion; print(inspect.signature(...))"`) rather than training-data memory — factory signatures and accepted `sidereal_mode`/`houses_system_identifier` literals have changed across versions and don't always match what's written in older docs or this file.
