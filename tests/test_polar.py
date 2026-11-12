@@ -444,3 +444,52 @@ def test_other_errors_carry_no_type(birth_rome):
     result = generate_natal_chart(**dict(birth_rome, lng=500.0), output_format="text")
     assert result["status"] == "error"
     assert "type" not in result
+
+
+# --- the angles' motion --------------------------------------------------------
+# Inside the polar circles the Ascendant really runs backwards through the
+# zodiac for part of the day (the Swiss Ephemeris speed matches a finite
+# difference); kerykeion hard-codes the angles as direct.
+
+SVALBARD_BACKWARD = dict(year=1990, month=6, day=15, hour=2, minute=0, lat=78.22, lng=15.63, tz_str="UTC")
+
+
+def point(text, name):
+    return re.search(rf'<point name="{name}" [^>]*motion="(\w+)" speed="(-?[\d.]+)"', text).groups()
+
+
+def test_a_backward_polar_ascendant_is_reported_retrograde():
+    text = generate_natal_chart(name="t", **SVALBARD_BACKWARD, house_system="W", output_format="text")["text"]
+    for name in ("Ascendant", "Descendant"):
+        motion, speed = point(text, name)
+        assert float(speed) == pytest.approx(-113.68, abs=0.01)
+        assert motion == "retrograde"
+    for name in ("Medium_Coeli", "Imum_Coeli"):
+        motion, speed = point(text, name)
+        assert float(speed) > 0 and motion == "direct"
+
+
+def test_ordinary_angles_stay_direct():
+    text = generate_natal_chart(name="t", **LONDON, output_format="text")["text"]
+    for name in ("Ascendant", "Descendant", "Medium_Coeli", "Imum_Coeli"):
+        motion, speed = point(text, name)
+        assert float(speed) > 0 and motion == "direct"
+
+
+def test_a_near_zero_angle_speed_is_not_retrograde():
+    from kerykeion_mcp.server import fix_axis_motion
+    subject = build(LONDON, active_points=None)
+    subject.ascendant.speed = -1e-9
+    assert fix_axis_motion(subject).ascendant.retrograde is False
+
+
+def test_every_tool_reports_the_backward_ascendant():
+    transit = generate_transit_chart(
+        **natal_args(LONDON), transit_lat=78.22, transit_lng=15.63, transit_tz_str="UTC",
+        **{f"transit_{k}": v for k, v in SVALBARD_BACKWARD.items() if k in ("year", "month", "day", "hour", "minute")},
+        house_system="W", output_format="text")
+    synastry = generate_synastry_chart(**pair(LONDON, SVALBARD_BACKWARD), house_system="W", output_format="text")
+    event = generate_event_chart(event_name="t", **SVALBARD_BACKWARD, house_system="W", output_format="text")
+    for result in (transit, synastry, event):
+        assert result["status"] == "success", result
+        assert re.search(r'<point name="Ascendant" [^>]*motion="retrograde" speed="-113.679', result["text"])
