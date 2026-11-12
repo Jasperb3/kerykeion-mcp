@@ -1026,10 +1026,14 @@ def generate_planetary_return(
 
     # Create return factory and get return subject
     def find_return(factory_lat: float):
+        # kerykeion 5.6's factory treats a 0.0 coordinate as missing (`if not
+        # lat`). Its subject is discarded -- only the geocentric moment is used,
+        # and that does not depend on location -- so nudge a zero off zero.
+        nonzero = lambda coordinate: coordinate if coordinate != 0 else 1e-6
         return_factory = PlanetaryReturnFactory(
             subject=natal,
-            lat=factory_lat,
-            lng=search_lng,
+            lat=nonzero(factory_lat),
+            lng=nonzero(search_lng),
             tz_str=search_tz_str,
             online=False,
         )
