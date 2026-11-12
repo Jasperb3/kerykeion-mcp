@@ -329,3 +329,84 @@ def test_synastry_and_composite_text_is_kerykeions_own(birth_rome, birth_london)
                             r' motion="[^"]*" speed="[^"]*"', r"\1", to_context(data))
         assert context_text(data) == motionless
         assert f'<chart_analysis type="{chart_type}">' in context_text(data)
+
+
+# exclude_derived_points: an aspect to the Descendant, IC or South Node mirrors
+# one to the Ascendant, MC or North Node, and an aspect between two angles is
+# fixed by the house frame, so the option drops both kinds.
+LONDON_1985 = dict(year=1985, month=6, day=21, hour=12, minute=0, lat=51.5074, lng=-0.1278, tz_str="Europe/London")
+MCMURDO_1992 = dict(year=1992, month=12, day=21, hour=3, minute=30, lat=-77.846, lng=166.676,
+                    tz_str="Antarctica/McMurdo")
+DERIVED = {"Descendant", "Imum_Coeli", "True_South_Lunar_Node", "Mean_South_Lunar_Node"}
+AXES = {"Ascendant", "Descendant", "Medium_Coeli", "Imum_Coeli"}
+
+
+def london_mcmurdo():
+    return {**{f"{k}1": v for k, v in dict(name="London", **LONDON_1985).items()},
+            **{f"{k}2": v for k, v in dict(name="McMurdo", **MCMURDO_1992).items()}}
+
+
+def assert_no_derived(pairs):
+    for first, second in pairs:
+        assert first not in DERIVED and second not in DERIVED, (first, second)
+        assert not (first in AXES and second in AXES), (first, second)
+
+
+def aspect_names(result):
+    return [(a["planet1"].split(":")[-1], a["planet2"].split(":")[-1]) for a in result["aspects"]]
+
+
+def text_aspect_names(text):
+    return re.findall(r'<aspect [^>]*?p1(?:_name)?="(\w+)"[^>]*? p2(?:_name)?="(\w+)"', text)
+
+
+def test_get_synastry_aspects_can_exclude_derived_points():
+    full = get_synastry_aspects(**london_mcmurdo())
+    lean = get_synastry_aspects(**london_mcmurdo(), exclude_derived_points=True)
+    assert (full["aspect_count"], lean["aspect_count"]) == (116, 76)
+    assert_no_derived(aspect_names(lean))
+    sun = {"planet1": "London:Sun", "planet2": "McMurdo:Sun", "aspect_type": "opposition"}
+    assert any(sun.items() <= a.items() for a in lean["aspects"])
+    assert lean["applied_settings"]["exclude_derived_points"] is True
+    assert "exclude_derived_points" not in full["applied_settings"]
+
+
+def test_get_aspects_can_exclude_derived_points():
+    full = get_aspects(name="London", **LONDON_1985)
+    lean = get_aspects(name="London", **LONDON_1985, exclude_derived_points=True)
+    assert (full["aspect_count"], lean["aspect_count"]) == (52, 34)
+    assert_no_derived(aspect_names(lean))
+    sun = lambda result: [a for a in result["aspects"] if "Sun" in (a["planet1"], a["planet2"])
+                          and not {a["planet1"], a["planet2"]} & DERIVED]
+    assert sun(lean) == sun(full) and sun(lean)
+
+
+def test_chart_texts_and_wheels_can_exclude_derived_points(tmp_output_dir):
+    from kerykeion_mcp.server import get_chart_patterns
+    date = {k: v for k, v in MCMURDO_1992.items() if k in ("year", "month", "day", "hour", "minute")}
+    natal = dict(name="London", **LONDON_1985)
+    calls = {
+        "natal": lambda **o: generate_natal_chart(**natal, **o),
+        "synastry": lambda **o: generate_synastry_chart(**london_mcmurdo(), **o),
+        "transit": lambda **o: generate_transit_chart(
+            **{f"natal_{k}": v for k, v in natal.items()}, transit_lat=MCMURDO_1992["lat"],
+            transit_lng=MCMURDO_1992["lng"], transit_tz_str=MCMURDO_1992["tz_str"],
+            **{f"transit_{k}": v for k, v in date.items()}, **o),
+        "composite": lambda **o: generate_composite_chart(**london_mcmurdo(), **o),
+        "return": lambda **o: generate_planetary_return(**natal, return_year=2026, **o),
+        "event": lambda **o: generate_event_chart(event_name="E", **LONDON_1985, **o),
+    }
+    for kind, call in calls.items():
+        full = call(output_format="text")
+        lean = call(output_format="images", exclude_derived_points=True)
+        assert lean["status"] == "success", (kind, lean)
+        full_pairs, lean_pairs = text_aspect_names(full["text"]), text_aspect_names(lean["text"])
+        assert full_pairs and 0 < len(lean_pairs) < len(full_pairs), kind
+        assert_no_derived(lean_pairs)
+        svg = open(lean["svg_path"], encoding="utf-8").read()
+        assert svg.count("kr:node='Aspect'") == len(lean_pairs), kind
+        assert lean["applied_settings"]["exclude_derived_points"] is True, kind
+        assert "exclude_derived_points" not in full["applied_settings"], kind
+    patterns = get_chart_patterns(name="London", **LONDON_1985, exclude_derived_points=True)
+    assert patterns["status"] == "success"
+    assert patterns["applied_settings"]["exclude_derived_points"] is True
