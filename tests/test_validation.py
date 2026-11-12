@@ -53,6 +53,14 @@ def test_invalid_house_system_rejected_listing_valid_codes(birth_rome):
     assert "Placidus" in result["hint"]
 
 
+def test_gauquelin_not_offered(birth_rome):
+    # kerykeion rejects "G" at every latitude, so it is not advertised.
+    result = generate_natal_chart(**birth_rome, house_system="G", output_format="text")
+    assert result["status"] == "error"
+    assert result["error"] == "Invalid house_system 'G'."
+    assert "Gauquelin" not in result["hint"]
+
+
 def test_invalid_chart_style_rejected(birth_rome):
     result = generate_natal_chart(**birth_rome, chart_style="bogus", output_format="text")
     assert result["status"] == "error"
