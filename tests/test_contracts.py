@@ -410,3 +410,34 @@ def test_chart_texts_and_wheels_can_exclude_derived_points(tmp_output_dir):
     patterns = get_chart_patterns(name="London", **LONDON_1985, exclude_derived_points=True)
     assert patterns["status"] == "success"
     assert patterns["applied_settings"]["exclude_derived_points"] is True
+
+
+# ---------------------------------------------------------------------------
+# Themes. kerykeion 6 ships classic, dark and black-and-white. The server
+# still listed light, strawberry and dark-high-contrast as valid, passed them
+# through, and kerykeion refused them ("Theme light is not available").
+# ---------------------------------------------------------------------------
+
+import pytest
+
+
+@pytest.mark.parametrize("theme", ["classic", "dark", "black-and-white"])
+def test_every_listed_theme_renders(birth_rome, tmp_output_dir, theme):
+    result = generate_natal_chart(**birth_rome, theme=theme, output_format="images", chart_style="wheel_only")
+    assert result["status"] == "success", result
+    assert result["applied_settings"]["theme"] == theme
+    assert result["svg_path"].endswith(".svg")
+
+
+@pytest.mark.parametrize("theme", ["light", "strawberry", "dark-high-contrast", "no-such-theme"])
+def test_a_theme_kerykeion_lacks_falls_back_to_classic(birth_rome, tmp_output_dir, theme):
+    result = generate_natal_chart(**birth_rome, theme=theme, output_format="images", chart_style="wheel_only")
+    assert result["status"] == "success", result
+    assert result["applied_settings"]["theme"] == "classic"
+
+
+def test_valid_themes_are_the_ones_kerykeion_has():
+    import typing
+    from kerykeion.schemas import literals
+    from kerykeion_mcp.validation import VALID_THEMES
+    assert sorted(VALID_THEMES) == sorted(typing.get_args(literals.KerykeionChartTheme))
