@@ -127,6 +127,54 @@ class SubjectFactory(AstrologicalSubjectFactory):
     def from_iso_utc_time(cls, *args, **kwargs):
         return fix_axis_motion(super().from_iso_utc_time(*args, **kwargs))
 
+_WALL_TIME = re.compile(r"wall time (\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2} .* in ([\w/+\-]+)")
+
+
+def clock_change_error(message: str) -> Optional[dict]:
+    """
+    A structured error for a local time that happened twice (the clocks went
+    back) or never (they went forward), or None if `message` isn't one.
+
+    kerykeion's message tells the caller to "specify is_dst", which no tool
+    accepts. What a caller can do is cast the reading it means in UTC, so the
+    hint gives the UTC time of each reading.
+    """
+    twice = "Ambiguous time error" in message
+    never = "Non-existent time error" in message
+    match = _WALL_TIME.search(message)
+    if not (twice or never) or not match:
+        return None
+    day, clock, zone = match.groups()
+    tz = pytz.timezone(zone)
+    naive = datetime.strptime(f"{day} {clock}", "%Y-%m-%d %H:%M")
+
+    def reading(is_dst: bool) -> str:
+        local = tz.localize(naive, is_dst=is_dst)
+        offset = local.utcoffset().total_seconds() / 3600
+        utc = local.astimezone(pytz.utc)
+        return f"{clock} {local.tzname()} (UTC{offset:+g}) is {utc:%Y-%m-%d %H:%M} UTC"
+
+    if twice:
+        return {
+            "status": "error",
+            "type": "AmbiguousTimeError",
+            "error": f"{clock} on {day} occurred twice in {zone}: the clocks went back across it.",
+            "hint": (
+                "Ask which reading is meant, then pass that one in UTC with "
+                f'tz_str="UTC" and the same coordinates: {reading(True)}; {reading(False)}.'
+            ),
+        }
+    return {
+        "status": "error",
+        "type": "NonexistentTimeError",
+        "error": f"{clock} on {day} never occurred in {zone}: the clocks went forward across it.",
+        "hint": (
+            "Check the time. If it was read from a clock that had not yet been "
+            f'put forward, pass it in UTC with tz_str="UTC" and the same coordinates: {reading(False)}.'
+        ),
+    }
+
+
 def handle_chart_errors(func):
     """
     Catch input/library errors and return a structured error response instead
@@ -146,7 +194,7 @@ def handle_chart_errors(func):
         except pytz.exceptions.UnknownTimeZoneError as e:
             return {"status": "error", "error": f"Unknown timezone: {e}", "hint": ""}
         except KerykeionException as e:
-            return {"status": "error", "error": str(e), "hint": ""}
+            return clock_change_error(str(e)) or {"status": "error", "error": str(e), "hint": ""}
         except swe.Error as e:
             # The Swiss Ephemeris backend's own errors (e.g. a date beyond the
             # data files) are about this chart's input.

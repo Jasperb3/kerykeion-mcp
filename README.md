@@ -275,6 +275,8 @@ A chart inside a polar circle cast with Placidus or Koch also carries a `warning
 
 Exactly at a pole (latitude ±90) there is no horizon, so a timed chart is refused for every subject and location with `"type": "PoleError"`; use ±89.99.
 
+A local time that happened twice (the clocks went back) or never (they went forward) is refused, because the tools take no daylight-saving flag. The error has `"type": "AmbiguousTimeError"` or `"NonexistentTimeError"`, and its hint gives each reading in UTC, to pass with `tz_str="UTC"` and the same coordinates: for 01:30 on 28 October 1990 in London, "01:30 BST (UTC+1) is 1990-10-28 00:30 UTC; 01:30 GMT (UTC+0) is 1990-10-28 01:30 UTC".
+
 Invalid input returns a structured error instead of a raw exception:
 
 ```json
