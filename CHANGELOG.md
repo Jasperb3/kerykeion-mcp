@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A local time that happened twice, or never, now says what to do.** A birth at 01:30 on a clocks-back night is rejected by kerykeion with a message telling the caller to "specify is_dst", which no tool accepts, and the hint was empty. The error now reads "01:30 on 1990-10-28 occurred twice in Europe/London: the clocks went back across it", with `type: "AmbiguousTimeError"` and a hint that gives each reading in UTC to pass with `tz_str="UTC"` ("01:30 BST (UTC+1) is 1990-10-28 00:30 UTC; 01:30 GMT (UTC+0) is 1990-10-28 01:30 UTC"). A time skipped when the clocks went forward gets `type: "NonexistentTimeError"` and the UTC time it would be on a clock not yet put forward. Other library errors are unchanged.
+
 ## 0.3.2
 
 ### Changed
